@@ -410,12 +410,24 @@ export class TryoutService {
         where: { id: String(attemptId) },
         include: { tryOut: { include: { subtests: true } } },
       });
+
+      if (currentAttempt && currentAttempt.userId !== userId) {
+        throw new ForbiddenException(
+          'Kamu tidak memiliki akses ke sesi tryout ini.',
+        );
+      }
     } else {
       currentAttempt = await this.prisma.tryOutAttempt.findFirst({
         where: { userId, tryOutId, status: 'IN_PROGRESS' },
         orderBy: { startedAt: 'desc' },
         include: { tryOut: { include: { subtests: true } } },
       });
+    }
+
+    if (currentAttempt && currentAttempt.tryOutId !== tryOutId) {
+      throw new ForbiddenException(
+        'Kamu tidak memiliki akses ke tryout ini.',
+      );
     }
 
     // --- AUTO FINISH LOGIC (DIPERBAIKI) ---

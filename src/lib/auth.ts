@@ -9,11 +9,12 @@ import { Logger } from '@nestjs/common';
 
 const logger = new Logger('Auth');
 
-const getOrigin = () => {
-  if (!process.env.FRONTEND_URL) {
-    throw new Error('FRONTEND_URL environment variable must be set');
-  }
-  return process.env.FRONTEND_URL;
+type AuthEnvironment = {
+  authBaseURL: string;
+  trustedOrigins: string[];
+  googleClientId: string;
+  googleClientSecret: string;
+  secret: string;
 };
 
 // --- SETUP NODEMAILER ---
@@ -55,10 +56,53 @@ const getResetPasswordEmailTemplate = (url: string, email: string) => {
 };
 
 // Validate required environment variables at startup
-const validateEnvVars = () => {
-  if (!process.env.TRUSTED_ORIGINS) {
-    throw new Error('TRUSTED_ORIGINS environment variable must be set');
+const validateEnvVars = (): AuthEnvironment => {
+  const authBaseURL = process.env.BETTER_AUTH_URL || process.env.FRONTEND_URL;
+  if (!authBaseURL) {
+    throw new Error(
+      'BETTER_AUTH_URL (or FRONTEND_URL) must be set to the public frontend origin that proxies /api/auth',
+    );
   }
+
+  let authOrigin: string;
+  try {
+    const parsedURL = new URL(authBaseURL);
+    if (!['http:', 'https:'].includes(parsedURL.protocol)) {
+      throw new Error('URL must use HTTP or HTTPS');
+    }
+    authOrigin = parsedURL.origin;
+  } catch (error) {
+    throw new Error(`BETTER_AUTH_URL is invalid: ${String(error)}`);
+  }
+
+  const trustedOrigins = (process.env.TRUSTED_ORIGINS || '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  if (trustedOrigins.length === 0) {
+    throw new Error('TRUSTED_ORIGINS must contain at least one allowed origin');
+  }
+
+  const secret = process.env.BETTER_AUTH_SECRET;
+  if (!secret || secret.length < 32) {
+    throw new Error('BETTER_AUTH_SECRET must contain at least 32 characters');
+  }
+
+  const googleClientId = process.env.GOOGLE_CLIENT_ID;
+  const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  if (!googleClientId || !googleClientSecret) {
+    throw new Error(
+      'GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set to enable Google OAuth',
+    );
+  }
+
+  return {
+    authBaseURL: authOrigin,
+    trustedOrigins: [...new Set([...trustedOrigins, authOrigin])],
+    googleClientId,
+    googleClientSecret,
+    secret,
+  };
 };
 
 /**
@@ -66,15 +110,19 @@ const validateEnvVars = () => {
  * This ensures only one database connection pool exists in the application.
  */
 export const createAuth = () => {
-  validateEnvVars();
+  const {
+    authBaseURL,
+    trustedOrigins,
+    googleClientId,
+    googleClientSecret,
+    secret,
+  } = validateEnvVars();
 
   const prisma = getPrismaClient();
-  const trustedOrigins = process.env.TRUSTED_ORIGINS!.split(',').map((o) =>
-    o.trim(),
-  );
 
   return betterAuth({
-    baseURL: getOrigin(),
+    baseURL: authBaseURL,
+    secret,
     trustedOrigins,
     database: prismaAdapter(prisma, {
       provider: 'postgresql',
@@ -100,9 +148,8 @@ export const createAuth = () => {
 
     socialProviders: {
       google: {
-        clientId: process.env.GOOGLE_CLIENT_ID as string,
-        clientSecret: process.env.GOOGLE_CLIENT_SECRET as string,
-        redirectUri: () => `${getOrigin()}/api/auth/callback/google`,
+        clientId: googleClientId,
+        clientSecret: googleClientSecret,
       },
     },
     user: {
@@ -126,8 +173,8 @@ export const createAuth = () => {
       cookies: {
         session_token: {
           attributes: {
-            sameSite: 'None',
-            secure: true,
+            sameSite: 'lax',
+            secure: process.env.NODE_ENV === 'production',
             httpOnly: true,
           },
         },

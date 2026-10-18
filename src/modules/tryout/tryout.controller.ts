@@ -1,7 +1,6 @@
 import {
   Controller,
   Get,
-  Req,
   Param,
   Query,
   UseGuards,
@@ -48,21 +47,17 @@ export class TryoutController {
   }
 
   @Get(':id/exam/:subtestId')
-  // @UseGuards(AuthGuard) // Opsional: Boleh di-comment jika ingin Public, atau nyalakan jika wajib login
+  @UseGuards(AuthGuard)
   async getTryoutExam(
     @Param('id') id: string,
     @Param('subtestId') subtestId: string,
-    @Query('userId') userIdFromQuery: string,
-    @Query('attemptId') attemptId: string,
-    @Req() req: any,
+    @Session() session: UserSession,
+    @Query('attemptId') attemptId?: string,
   ) {
-    // Ambil userId dari Query (prioritas) atau Session
-    const userId = userIdFromQuery || req.session?.user?.id || req.user?.id;
-
     return this.tryoutService.getSubtestQuestions(
       id,
       subtestId,
-      userId,
+      session.user.id,
       attemptId,
     );
   }
