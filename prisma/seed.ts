@@ -24,9 +24,10 @@ async function main() {
   // 1. TOKEN PACKAGES (Menggunakan Upsert agar tidak duplikat)
   // =========================================================
   const packages = [
-    { id: 'pkg-1', name: 'Paket Hemat', tokens: 20, price: 15000 },
-    { id: 'pkg-2', name: 'Paket Populer', tokens: 50, price: 35000 },
-    { id: 'pkg-3', name: 'Paket Sultan', tokens: 150, price: 100000 },
+    { id: 'pkg-1', name: '1 Koin', tokens: 1, price: 15000 },
+    { id: 'pkg-2', name: '3 Koin', tokens: 3, price: 39000 },
+    { id: 'pkg-3', name: '5 Koin', tokens: 5, price: 59000 },
+    { id: 'pkg-4', name: '10 Koin', tokens: 10, price: 89000 },
   ];
 
   for (const pkg of packages) {
