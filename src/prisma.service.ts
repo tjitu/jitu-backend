@@ -65,6 +65,9 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get tryOutAttempt() {
     return this.client.tryOutAttempt;
   }
+  get article() {
+    return this.client.article;
+  }
   get userAnswer() {
     return this.client.userAnswer;
   }

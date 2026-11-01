@@ -263,6 +263,27 @@ model TryOutAttempt {
   answers UserAnswer[]
 }
 
+model Article {
+  id              String   @id
+  title           String
+  slug            String
+  summary         String?  @db.Text
+  content         String   @db.Text
+  coverImageUrl   String?  @map("cover_image_url")
+  category        String   @default("UTBK-SNBT")
+  tags            String   @default("")
+  authorName      String   @default("Tim Jitu PTN") @map("author_name")
+  status          String   @default("DRAFT")
+  readTimeMinutes Int      @default(3) @map("read_time_minutes")
+  viewsCount      Int      @default(0) @map("views_count")
+  publishedAt     DateTime? @map("published_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([status, publishedAt])
+  @@map("articles")
+}
+
 model UserAnswer {
   id              String   @id @default(cuid())
   tryOutAttemptId String   @map("tryout_attempt_id")

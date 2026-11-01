@@ -14,6 +14,7 @@ import { PrismaModule } from './prisma.module';
 import { ExamModule } from './modules/exam/exam.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { ProfileModule } from './modules/profile/profile.module';
+import { ArticlesModule } from './modules/articles/articles.module';
 import { AuthModule as CustomAuthModule } from './modules/auth/auth.module';
 import * as bodyParser from 'body-parser';
 
@@ -35,6 +36,7 @@ import * as bodyParser from 'body-parser';
     ExamModule,
     AdminModule,
     ProfileModule,
+    ArticlesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
