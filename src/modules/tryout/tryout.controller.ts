@@ -12,7 +12,7 @@ import {
   TryoutDetailDto,
   LeaderboardDto,
 } from './dto/tryout.dto';
-import { AuthGuard } from '../../guards/auth.guard';
+import { AuthGuard, OptionalAuthGuard } from '../../guards/auth.guard';
 import { Session } from '../../decorators/session.decorator';
 import type { UserSession } from '../../decorators/session.decorator'; // Gunakan import type!
 
@@ -21,11 +21,11 @@ export class TryoutController {
   constructor(private readonly tryoutService: TryoutService) {}
 
   @Get()
-  @UseGuards(AuthGuard)
+  @UseGuards(OptionalAuthGuard)
   async getAllTryouts(
-    @Session() session: UserSession,
+    @Session() session?: UserSession,
   ): Promise<TryOutCardDto[]> {
-    return this.tryoutService.getTryouts(session.user.id);
+    return this.tryoutService.getTryouts(session?.user?.id);
   }
 
   @Get(':id')
