@@ -44,6 +44,25 @@ export class AuthGuard implements CanActivate {
 }
 
 @Injectable()
+export class OptionalAuthGuard extends AuthGuard {
+  constructor(identities: AuthIdentityService) {
+    super(identities);
+  }
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
+    const authorization = request.headers.authorization;
+    const match = authorization?.match(/^Bearer\s+(.+)$/i);
+    if (!match) return true;
+    try {
+      return await super.canActivate(context);
+    } catch {
+      return true;
+    }
+  }
+}
+
+@Injectable()
 export class AdminAuthGuard extends AuthGuard {
   constructor(identities: AuthIdentityService) {
     super(identities);
