@@ -31,11 +31,10 @@ import { AdminDailyService } from './services/daily.service';
 import { AdminTryoutResultService } from './services/result.service';
 import { AdminAiService } from './services/ai.service';
 import { PaymentStatus } from 'generated/prisma/enums';
-import { AuthGuard, Roles } from '@thallesp/nestjs-better-auth';
+import { AdminAuthGuard } from '../../guards/auth.guard';
 
 @Controller('admin')
-@UseGuards(AuthGuard)
-@Roles(['ADMIN'])
+@UseGuards(AdminAuthGuard)
 export class AdminController {
   constructor(
     private readonly adminService: AdminService,

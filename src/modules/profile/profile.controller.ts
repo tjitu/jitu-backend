@@ -2,16 +2,14 @@ import {
   Controller,
   Get,
   Patch,
-  Post,
   Body,
-  Req,
   NotFoundException,
   UseGuards,
   Session,
 } from '@nestjs/common';
 import { ProfileService } from './profile.service';
-import { AuthGuard } from '@thallesp/nestjs-better-auth';
-import type { UserSession } from '@thallesp/nestjs-better-auth';
+import { AuthGuard } from '../../guards/auth.guard';
+import type { UserSession } from '../../decorators/session.decorator';
 @Controller('profile')
 @UseGuards(AuthGuard)
 export class ProfileController {
@@ -46,12 +44,5 @@ export class ProfileController {
     }
 
     return this.profileService.updateProfile(userId, body);
-  }
-
-  @Post('set-password')
-  async setPassword(@Req() req: any, @Body() body: { password: string }) {
-    const headers = new Headers(req.headers as any);
-
-    return this.profileService.setPassword(headers, body.password);
   }
 }

@@ -1,16 +1,12 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
+import { AdminAuthGuard, AuthGuard } from '../../guards/auth.guard';
 import { AuthController } from './auth.controller';
-import { getAuth } from '../../lib/auth';
-import { AUTH_PROVIDER } from './auth.constants';
+import { AuthIdentityService } from './auth-identity.service';
 
+@Global()
 @Module({
   controllers: [AuthController],
-  providers: [
-    {
-      provide: AUTH_PROVIDER,
-      useFactory: () => getAuth(),
-    },
-  ],
-  exports: [AUTH_PROVIDER],
+  providers: [AuthIdentityService, AuthGuard, AdminAuthGuard],
+  exports: [AuthIdentityService, AuthGuard, AdminAuthGuard],
 })
 export class AuthModule {}

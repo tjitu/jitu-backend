@@ -74,7 +74,7 @@ async function main() {
   });
 
   // User Khusus untuk Test Flow Pembayaran
-  const userCoba = await prisma.user.upsert({
+  await prisma.user.upsert({
     where: { email: 'coba@example.com' },
     update: { tokenBalance: 100 }, // Reset saldo ke 100
     create: {
@@ -87,26 +87,7 @@ async function main() {
     },
   });
 
-  // Tambahkan Account agar bisa login dengan password 'password123'
-  // Hash di bawah adalah hasil scrypt untuk 'password123' yang kompatibel dengan better-auth
-  await prisma.account.upsert({
-    where: { id: 'account-coba-id' },
-    update: {},
-    create: {
-      id: 'account-coba-id',
-      userId: userCoba.id,
-      accountId: userCoba.id,
-      providerId: 'email',
-      password: 'password123', // Better auth akan menghash ini jika lewat API, tapi untuk seed kita masukkan plain jika db adapter mengizinkan atau biarkan system menghandle.
-      // Namun amannya, karena kita manual ke DB, kita harus memberikan password yang bisa dikenali.
-      // Jika better-auth menggunakan plain (jarang), ini berhasil. Jika tidak, saya akan buatkan user baru via register.
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    },
-  });
-  console.log(
-    '✅ Users seeded (termasuk User Coba dengan password: password123)',
-  );
+  console.log('✅ Local demo users seeded. Create their Firebase Auth credentials separately.');
 
   const userAdjie = await prisma.user.upsert({
     where: { email: 'adjiesidja20@gmail.com' },

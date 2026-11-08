@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { ExamService } from './exam.service';
 import { Observable } from 'rxjs';
-import { AuthGuard } from '@thallesp/nestjs-better-auth'; // [FIX] Hapus import Public dari thallesp
+import { AuthGuard } from '../../guards/auth.guard';
 import { MessageEvent } from './interfaces';
 
 @Controller('exam')

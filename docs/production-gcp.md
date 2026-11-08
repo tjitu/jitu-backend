@@ -16,9 +16,8 @@ Use `.env.production.example` as the Cloud Run variable checklist. Important val
 - `PORT=8080`
 - `DATABASE_URL` from Supabase with `schema=jitu_backend` and `sslmode=require`
 - `FRONTEND_URL=https://YOUR_VERCEL_DOMAIN`
-- `BETTER_AUTH_URL=https://YOUR_BACKEND_CLOUD_RUN_URL`
 - `ALLOWED_ORIGINS=https://YOUR_VERCEL_DOMAIN`
-- `TRUSTED_ORIGINS=https://YOUR_VERCEL_DOMAIN`
+- `FIREBASE_PROJECT_ID=jitu-ptn-main-auth-2026`
 - `AI_SERVICE_URL=https://YOUR_AI_SERVICE_CLOUD_RUN_URL`
 - `AI_SERVICE_INTERNAL_API_KEY` must match the AI service `INTERNAL_API_KEY`
 - `CLOUDINARY_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`
@@ -52,16 +51,9 @@ Required GCP Secret Manager secrets:
 
 ```text
 backend-database-url
-backend-better-auth-secret
-google-client-id
-google-client-secret
 cloudinary-cloud-name
 cloudinary-api-key
 cloudinary-api-secret
-smtp-host
-smtp-user
-smtp-pass
-smtp-from
 midtrans-merchant-id
 midtrans-client-key
 midtrans-server-key
@@ -69,6 +61,8 @@ ai-internal-api-key
 ```
 
 The value of `ai-internal-api-key` must be exactly the same secret used by the AI service as `INTERNAL_API_KEY`.
+
+The backend verifies tokens using this project ID and Google's public signing certificates. It does not need a Firebase service-account key; do not add one to the repository.
 
 ## Supabase Database
 

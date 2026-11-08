@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
-import { auth } from '../../lib/auth';
 import { MidtransService } from '../shop/services/midtrans.service';
 
 @Injectable()
@@ -84,9 +83,7 @@ export class ProfileService {
     }
 
     const hasPassword = user.accounts.some(
-      (acc) =>
-        acc.providerId === 'credential' ||
-        (acc.password && acc.password.length > 0),
+      (account) => account.providerId === 'firebase-password',
     );
 
     return {
@@ -126,10 +123,4 @@ export class ProfileService {
     });
   }
 
-  async setPassword(headers: Headers, newPassword: string) {
-    return auth.api.setPassword({
-      body: { newPassword },
-      headers: headers,
-    });
-  }
 }
