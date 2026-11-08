@@ -37,6 +37,6 @@ async function bootstrap() {
 
   app.useGlobalInterceptors(new ClassSerializerInterceptor(app.get(Reflector)));
 
-  await app.listen(process.env.PORT ?? 3000, process.env.HOST || '127.0.0.1');
+  await app.listen(process.env.PORT ?? 3000);
 }
 bootstrap();
