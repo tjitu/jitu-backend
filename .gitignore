@@ -59,6 +59,3 @@ pids
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 /generated/prisma
-
-# Google GitHub Actions auth temporary credentials
-gha-creds-*.json
