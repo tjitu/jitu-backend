@@ -82,6 +82,7 @@ jobs:
             NODE_ENV=production
             HOST=0.0.0.0
             PORT=8080
+            FIREBASE_PROJECT_ID=${{ vars.FIREBASE_PROJECT_ID || 'jitu-ptn-main-auth-2026' }}
             FRONTEND_URL=${{ vars.FRONTEND_URL }}
             BETTER_AUTH_URL=${{ vars.BACKEND_URL }}
             ALLOWED_ORIGINS=${{ vars.FRONTEND_URL }}

@@ -47,6 +47,8 @@ FRONTEND_URL=https://YOUR_VERCEL_DOMAIN
 AI_SERVICE_URL=https://YOUR_AI_SERVICE_CLOUD_RUN_URL
 ```
 
+The deploy workflow sets `FIREBASE_PROJECT_ID` to `jitu-ptn-main-auth-2026` by default. Set the GitHub repository variable `FIREBASE_PROJECT_ID` only if deploying this backend against a different Firebase project.
+
 Required GCP Secret Manager secrets:
 
 ```text
