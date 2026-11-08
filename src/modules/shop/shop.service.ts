@@ -261,8 +261,8 @@ export class ShopService {
       // 1. Fetch user info for Snap
       const user = await this.prisma.user.findUnique({ where: { id: userId } });
 
-      // 2. Call Midtrans Snap API (handles GoPay & Dynamic QRIS)
-      const snapResult = await this.midtransService.createSnapTransaction(
+      // 2. Call Midtrans Direct QRIS via Snap charge
+      const qrisResult = await this.midtransService.createQrisTransaction(
         orderId,
         selectedPackage.price,
         [
@@ -283,11 +283,12 @@ export class ShopService {
       await this.prisma.payment.update({
         where: { id: payment.id },
         data: {
-          snapToken: snapResult.token,
+          snapToken: qrisResult.token,
           paymentMethod: 'QRIS',
           metadata: {
-            redirect_url: snapResult.redirect_url,
-            snap_token: snapResult.token,
+            redirect_url: qrisResult.redirect_url,
+            qr_code_url: qrisResult.qr_url,
+            qr_string: qrisResult.qr_string,
             package_name: selectedPackage.name,
           },
         },
@@ -300,11 +301,10 @@ export class ShopService {
         tokenAmount: payment.tokenAmount,
         status: payment.status,
         paymentMethod: 'QRIS',
-        snapToken: snapResult.token,
-        redirectUrl: snapResult.redirect_url,
-        qrCodeUrl: undefined,
-        deeplinkUrl: undefined,
-        expiryTime: new Date(Date.now() + 15 * 60 * 1000).toISOString(), // 15 minutes
+        snapToken: qrisResult.token,
+        redirectUrl: qrisResult.redirect_url,
+        qrCodeUrl: qrisResult.qr_url,
+        expiryTime: qrisResult.expiry_time,
         packageName: selectedPackage.name,
       };
     } catch (error) {

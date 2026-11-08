@@ -99,6 +99,57 @@ export class MidtransService {
   }
 
   /**
+   * Create direct Snap QRIS transaction (returns raw qr_string and qris image url)
+   */
+  async createQrisTransaction(
+    orderId: string,
+    grossAmount: number,
+    itemDetails?: Array<{ id: string; price: number; quantity: number; name: string }>,
+    customerDetails?: { first_name?: string; email?: string },
+  ): Promise<{ token: string; redirect_url: string; qr_string?: string; qr_url?: string; expiry_time: string }> {
+    const snapResult = await this.createSnapTransaction(orderId, grossAmount, itemDetails, customerDetails);
+
+    const chargeUrl = this.isProduction
+      ? `https://app.midtrans.com/snap/v2/transactions/${snapResult.token}/charge`
+      : `https://app.sandbox.midtrans.com/snap/v2/transactions/${snapResult.token}/charge`;
+
+    try {
+      const chargeRes = await fetch(chargeUrl, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          payment_type: 'qris',
+          payment_params: {
+            acquirer: ['gopay'],
+          },
+        }),
+      });
+
+      if (chargeRes.ok) {
+        const chargeData = await chargeRes.json();
+        return {
+          token: snapResult.token,
+          redirect_url: snapResult.redirect_url,
+          qr_string: chargeData.qr_string,
+          qr_url: chargeData.qris_url,
+          expiry_time: chargeData.expiry_time || new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+        };
+      }
+    } catch (e) {
+      this.logger.error('Failed to charge QRIS directly:', e);
+    }
+
+    return {
+      token: snapResult.token,
+      redirect_url: snapResult.redirect_url,
+      expiry_time: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+    };
+  }
+
+  /**
    * Create GoPay/E-Wallet charge
    */
   async createEWalletCharge(
