@@ -46,4 +46,6 @@ export class EWalletPaymentResponse {
   deeplinkUrl?: string;
   expiryTime?: string;
   packageName: string;
+  snapToken?: string;
+  redirectUrl?: string;
 }

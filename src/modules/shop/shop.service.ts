@@ -258,40 +258,37 @@ export class ShopService {
     });
 
     try {
-      // Call Midtrans Charge API
-      const chargeResponse = await this.midtransService.createEWalletCharge(
+      // 1. Fetch user info for Snap
+      const user = await this.prisma.user.findUnique({ where: { id: userId } });
+
+      // 2. Call Midtrans Snap API (handles GoPay & Dynamic QRIS)
+      const snapResult = await this.midtransService.createSnapTransaction(
         orderId,
         selectedPackage.price,
-        callbackUrl,
+        [
+          {
+            id: selectedPackage.id,
+            price: selectedPackage.price,
+            quantity: 1,
+            name: selectedPackage.name,
+          },
+        ],
+        {
+          first_name: user?.name || user?.email?.split('@')[0] || 'Siswa Jitu',
+          email: user?.email || undefined,
+        },
       );
 
-      this.logger.debug('Midtrans charge response', chargeResponse);
-
-      // Extract QR Code and Deeplink URLs from actions
-      const actions = chargeResponse.actions || [];
-
-      if (!chargeResponse.actions) {
-        console.warn(
-          'Midtrans response missing actions:',
-          JSON.stringify(chargeResponse),
-        );
-      }
-
-      const qrCodeAction = actions.find(
-        (action) => action.name === 'generate-qr-code',
-      );
-      const deeplinkAction = actions.find(
-        (action) => action.name === 'deeplink-redirect',
-      );
-
-      // Update payment with Midtrans transaction ID
+      // 3. Update payment with Midtrans Snap token and metadata
       await this.prisma.payment.update({
         where: { id: payment.id },
         data: {
+          snapToken: snapResult.token,
+          paymentMethod: 'QRIS',
           metadata: {
-            midtrans_transaction_id: chargeResponse.transaction_id,
-            qr_code_url: qrCodeAction?.url,
-            deeplink_url: deeplinkAction?.url,
+            redirect_url: snapResult.redirect_url,
+            snap_token: snapResult.token,
+            package_name: selectedPackage.name,
           },
         },
       });
@@ -302,15 +299,17 @@ export class ShopService {
         amount: payment.amount,
         tokenAmount: payment.tokenAmount,
         status: payment.status,
-        paymentMethod: payment.paymentMethod,
-        qrCodeUrl: qrCodeAction?.url,
-        deeplinkUrl: deeplinkAction?.url,
+        paymentMethod: 'QRIS',
+        snapToken: snapResult.token,
+        redirectUrl: snapResult.redirect_url,
+        qrCodeUrl: undefined,
+        deeplinkUrl: undefined,
         expiryTime: new Date(Date.now() + 15 * 60 * 1000).toISOString(), // 15 minutes
         packageName: selectedPackage.name,
       };
     } catch (error) {
       // If Midtrans API fails, delete the payment record
-      await this.prisma.payment.delete({ where: { id: payment.id } });
+      await this.prisma.payment.delete({ where: { id: payment.id } }).catch(() => {});
       throw new BadRequestException(
         `Failed to create e-wallet payment: ${error.message}`,
       );

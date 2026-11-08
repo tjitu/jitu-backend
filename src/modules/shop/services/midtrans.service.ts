@@ -58,6 +58,47 @@ export class MidtransService {
   }
 
   /**
+   * Create Snap transaction for QRIS and GoPay
+   */
+  async createSnapTransaction(
+    orderId: string,
+    grossAmount: number,
+    itemDetails?: Array<{ id: string; price: number; quantity: number; name: string }>,
+    customerDetails?: { first_name?: string; email?: string },
+  ): Promise<{ token: string; redirect_url: string }> {
+    const snapUrl = this.isProduction
+      ? 'https://app.midtrans.com/snap/v1/transactions'
+      : 'https://app.sandbox.midtrans.com/snap/v1/transactions';
+
+    const payload = {
+      transaction_details: {
+        order_id: orderId,
+        gross_amount: Math.round(grossAmount),
+      },
+      enabled_payments: ['gopay', 'qris', 'other_qris'],
+      item_details: itemDetails,
+      customer_details: customerDetails,
+    };
+
+    const response = await fetch(snapUrl, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        Authorization: this.getAuthHeader(),
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Midtrans Snap Error: ${response.status} - ${errorText}`);
+    }
+
+    return response.json() as Promise<{ token: string; redirect_url: string }>;
+  }
+
+  /**
    * Create GoPay/E-Wallet charge
    */
   async createEWalletCharge(
