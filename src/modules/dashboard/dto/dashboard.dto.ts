@@ -55,6 +55,8 @@ export class UserStatsDto {
   totalFinished: number;
   tokenBalance: number;
   currentStreak: number;
+  isPremium?: boolean;
+  premiumExpiresAt?: Date | null;
 }
 
 export class SubmitDailyAnswerDto {

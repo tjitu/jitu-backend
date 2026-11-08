@@ -71,6 +71,12 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get userAnswer() {
     return this.client.userAnswer;
   }
+  get voucher() {
+    return this.client.voucher;
+  }
+  get voucherUsage() {
+    return this.client.voucherUsage;
+  }
 
   // Proxy transaction and raw query methods
   $transaction<T>(fn: Parameters<PrismaClient['$transaction']>[0]): Promise<T> {

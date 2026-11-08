@@ -67,7 +67,7 @@ export class HistoryService {
       };
 
       tryout.answers.forEach((ans) => {
-        if (ans.isCorrect) {
+        if (ans.isCorrect && ans.question.subtest) {
           const subtestName = ans.question.subtest.name;
           const points = ans.question.points;
 

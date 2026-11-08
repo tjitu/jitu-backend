@@ -48,4 +48,24 @@ export class EWalletPaymentResponse {
   packageName: string;
   snapToken?: string;
   redirectUrl?: string;
+  originalAmount?: number;
+  discountAmount?: number;
+  voucherCode?: string;
+}
+
+export class ValidateVoucherDto {
+  code: string;
+  packageId: string;
+}
+
+export class ValidateVoucherResponse {
+  valid: boolean;
+  voucherId: string;
+  code: string;
+  discountPercent: number;
+  discountAmount: number;
+  originalPrice: number;
+  finalPrice: number;
+  description?: string | null;
+  referrerName?: string | null;
 }

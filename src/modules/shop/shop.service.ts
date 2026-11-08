@@ -12,6 +12,7 @@ import { MidtransService } from './services/midtrans.service';
 import type {
   EWalletPaymentResponse,
   MidtransNotificationDto,
+  ValidateVoucherResponse,
 } from './dto/ewallet.dto';
 
 @Injectable()
@@ -209,12 +210,94 @@ export class ShopService {
   }
 
   /**
-   * Create E-Wallet payment using Midtrans GoPay
+   * Validate a voucher / referral code and calculate discount
+   */
+  async validateVoucher(
+    rawCode: string,
+    packageId: string,
+    userId?: string,
+  ): Promise<ValidateVoucherResponse> {
+    if (!rawCode || !rawCode.trim()) {
+      throw new BadRequestException('Kode voucher wajib diisi.');
+    }
+
+    const code = rawCode.trim().toUpperCase();
+
+    // 1. Find voucher in database
+    const voucher = await this.prisma.voucher.findUnique({
+      where: { code },
+    });
+
+    if (!voucher) {
+      throw new BadRequestException('Kode voucher / referal tidak ditemukan.');
+    }
+
+    if (!voucher.isActive) {
+      throw new BadRequestException('Kode voucher / referal sudah tidak aktif.');
+    }
+
+    const now = new Date();
+    if (voucher.expiresAt && voucher.expiresAt < now) {
+      throw new BadRequestException('Kode voucher / referal sudah kedaluwarsa.');
+    }
+
+    if (
+      voucher.maxUsage !== null &&
+      voucher.maxUsage !== undefined &&
+      voucher.usedCount >= voucher.maxUsage
+    ) {
+      throw new BadRequestException(
+        'Kuota penggunaan kode voucher ini sudah habis.',
+      );
+    }
+
+    // 2. Find package
+    const selectedPackage = await this.prisma.tokenPackage.findUnique({
+      where: { id: packageId },
+    });
+
+    if (!selectedPackage) {
+      throw new BadRequestException(
+        'Paket koin tidak valid atau tidak ditemukan.',
+      );
+    }
+
+    if (voucher.minPurchase > 0 && selectedPackage.price < voucher.minPurchase) {
+      throw new BadRequestException(
+        `Minimal pembelian untuk kode ini adalah Rp ${voucher.minPurchase.toLocaleString('id-ID')}.`,
+      );
+    }
+
+    // 3. Calculate discount
+    let discountAmount = Math.round(
+      (selectedPackage.price * voucher.discountPercent) / 100,
+    );
+    if (voucher.maxDiscount && discountAmount > voucher.maxDiscount) {
+      discountAmount = voucher.maxDiscount;
+    }
+    const finalPrice = Math.max(0, selectedPackage.price - discountAmount);
+
+    return {
+      valid: true,
+      voucherId: voucher.id,
+      code: voucher.code,
+      discountPercent: voucher.discountPercent,
+      discountAmount,
+      originalPrice: selectedPackage.price,
+      finalPrice,
+      description: voucher.description || `Diskon ${voucher.discountPercent}%`,
+      referrerName: voucher.referrerName,
+    };
+  }
+
+  /**
+   * Create E-Wallet payment using Midtrans GoPay with optional voucher discount
    */
   async createEWalletPayment(
     userId: string,
     packageId: string,
     callbackUrl?: string,
+    voucherCode?: string,
   ): Promise<EWalletPaymentResponse> {
     // Find package
     const selectedPackage = await this.prisma.tokenPackage.findUnique({
@@ -241,6 +324,24 @@ export class ShopService {
       );
     }
 
+    // Apply voucher if provided
+    let voucherId: string | null = null;
+    let appliedVoucherCode: string | null = null;
+    let discountAmount = 0;
+    let finalPrice = selectedPackage.price;
+
+    if (voucherCode && voucherCode.trim()) {
+      const vResult = await this.validateVoucher(
+        voucherCode.trim(),
+        packageId,
+        userId,
+      );
+      voucherId = vResult.voucherId;
+      appliedVoucherCode = vResult.code;
+      discountAmount = vResult.discountAmount;
+      finalPrice = vResult.finalPrice;
+    }
+
     // Generate unique order ID
     const orderId = `ORDER-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
 
@@ -250,27 +351,51 @@ export class ShopService {
         userId,
         tokenPackageId: selectedPackage.id,
         orderId,
-        amount: selectedPackage.price,
+        amount: finalPrice,
+        originalAmount: selectedPackage.price,
+        discountAmount,
+        voucherId,
+        voucherCode: appliedVoucherCode,
         tokenAmount: selectedPackage.tokenAmount,
-        status: PaymentStatus.PENDING,
-        paymentMethod: 'GOPAY',
+        status: finalPrice === 0 ? PaymentStatus.CONFIRMED : PaymentStatus.PENDING,
+        paymentMethod: finalPrice === 0 ? 'FREE_VOUCHER' : 'GOPAY',
       },
     });
+
+    // If 100% discount free voucher: confirm immediately and credit benefits!
+    if (finalPrice === 0) {
+      await this.setPaid(payment.id);
+      return {
+        transactionId: payment.id,
+        orderId: payment.orderId,
+        amount: 0,
+        originalAmount: selectedPackage.price,
+        discountAmount,
+        voucherCode: appliedVoucherCode || undefined,
+        tokenAmount: payment.tokenAmount,
+        status: PaymentStatus.CONFIRMED,
+        paymentMethod: 'FREE_VOUCHER',
+        packageName: selectedPackage.name,
+      };
+    }
 
     try {
       // 1. Fetch user info for Snap
       const user = await this.prisma.user.findUnique({ where: { id: userId } });
 
-      // 2. Call Midtrans Direct QRIS via Snap charge
+      // 2. Call Midtrans Direct QRIS via Snap charge with final discounted price
       const qrisResult = await this.midtransService.createQrisTransaction(
         orderId,
-        selectedPackage.price,
+        finalPrice,
         [
           {
             id: selectedPackage.id,
-            price: selectedPackage.price,
+            price: finalPrice,
             quantity: 1,
-            name: selectedPackage.name,
+            name: `${selectedPackage.name}${discountAmount > 0 ? ` (${appliedVoucherCode})` : ''}`.slice(
+              0,
+              50,
+            ),
           },
         ],
         {
@@ -290,6 +415,9 @@ export class ShopService {
             qr_code_url: qrisResult.qr_url,
             qr_string: qrisResult.qr_string,
             package_name: selectedPackage.name,
+            original_amount: selectedPackage.price,
+            discount_amount: discountAmount,
+            voucher_code: appliedVoucherCode,
           },
         },
       });
@@ -298,6 +426,9 @@ export class ShopService {
         transactionId: payment.id,
         orderId: payment.orderId,
         amount: payment.amount,
+        originalAmount: selectedPackage.price,
+        discountAmount,
+        voucherCode: appliedVoucherCode || undefined,
         tokenAmount: payment.tokenAmount,
         status: payment.status,
         paymentMethod: 'QRIS',
@@ -411,6 +542,7 @@ export class ShopService {
 
       const res = await tx.payment.findUnique({
         where: { id: transactionId },
+        include: { tokenPackage: true },
       });
 
       if (!res) {
@@ -418,12 +550,63 @@ export class ShopService {
       }
 
       if (updateResult.count > 0) {
+        const pkgName =
+          res.tokenPackage?.name ||
+          (res.metadata as any)?.package_name ||
+          '';
+        const isPass = pkgName.toLowerCase().includes('pass');
+
+        const currentUser = await tx.user.findUnique({
+          where: { id: res.userId },
+          select: { premiumExpiresAt: true },
+        });
+
+        const now = new Date();
+        let newPremiumExpiresAt: Date | undefined = undefined;
+        if (isPass) {
+          const baseDate =
+            currentUser?.premiumExpiresAt && currentUser.premiumExpiresAt > now
+              ? currentUser.premiumExpiresAt
+              : now;
+          newPremiumExpiresAt = new Date(
+            baseDate.getTime() + 30 * 24 * 60 * 60 * 1000,
+          );
+        }
+
         await tx.user.update({
           where: { id: res.userId },
           data: {
             tokenBalance: { increment: res.tokenAmount },
+            ...(isPass
+              ? { isPremium: true, premiumExpiresAt: newPremiumExpiresAt }
+              : {}),
           },
         });
+
+        // If payment used a voucher, increment usedCount and record usage
+        if (res.voucherId) {
+          await tx.voucher
+            .update({
+              where: { id: res.voucherId },
+              data: { usedCount: { increment: 1 } },
+            })
+            .catch((e) =>
+              this.logger.warn(`Failed to increment voucher usage: ${e.message}`),
+            );
+
+          await tx.voucherUsage
+            .create({
+              data: {
+                voucherId: res.voucherId,
+                userId: res.userId,
+                paymentId: res.id,
+                discount: res.discountAmount || 0,
+              },
+            })
+            .catch((e) =>
+              this.logger.warn(`Failed to record voucher usage: ${e.message}`),
+            );
+        }
       }
 
       return res;
@@ -542,6 +725,7 @@ export class ShopService {
         ): Promise<{ alreadyConfirmed: boolean; credited: boolean }> => {
           const currentPayment = await tx.payment.findUnique({
             where: { id: payment.id },
+            include: { tokenPackage: true },
           });
 
           if (!currentPayment) {
@@ -566,12 +750,64 @@ export class ShopService {
           });
 
           if (newStatus === PaymentStatus.CONFIRMED) {
+            const pkgName =
+              currentPayment.tokenPackage?.name ||
+              (currentPayment.metadata as any)?.package_name ||
+              '';
+            const isPass = pkgName.toLowerCase().includes('pass');
+
+            const currentUser = await tx.user.findUnique({
+              where: { id: currentPayment.userId },
+              select: { premiumExpiresAt: true },
+            });
+
+            const now = new Date();
+            let newPremiumExpiresAt: Date | undefined = undefined;
+            if (isPass) {
+              const baseDate =
+                currentUser?.premiumExpiresAt &&
+                currentUser.premiumExpiresAt > now
+                  ? currentUser.premiumExpiresAt
+                  : now;
+              newPremiumExpiresAt = new Date(
+                baseDate.getTime() + 30 * 24 * 60 * 60 * 1000,
+              );
+            }
+
             await tx.user.update({
               where: { id: currentPayment.userId },
               data: {
                 tokenBalance: { increment: currentPayment.tokenAmount },
+                ...(isPass
+                  ? { isPremium: true, premiumExpiresAt: newPremiumExpiresAt }
+                  : {}),
               },
             });
+
+            // If payment used a voucher, increment usedCount and record usage
+            if (currentPayment.voucherId) {
+              await tx.voucher
+                .update({
+                  where: { id: currentPayment.voucherId },
+                  data: { usedCount: { increment: 1 } },
+                })
+                .catch((e) =>
+                  this.logger.warn(`Failed to increment voucher usage: ${e.message}`),
+                );
+
+              await tx.voucherUsage
+                .create({
+                  data: {
+                    voucherId: currentPayment.voucherId,
+                    userId: currentPayment.userId,
+                    paymentId: currentPayment.id,
+                    discount: currentPayment.discountAmount || 0,
+                  },
+                })
+                .catch((e) =>
+                  this.logger.warn(`Failed to record voucher usage: ${e.message}`),
+                );
+            }
 
             return { alreadyConfirmed: false, credited: true };
           }

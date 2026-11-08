@@ -57,6 +57,9 @@ model User {
   currentStreak     Int                @default(0)
   lastDailyDate     DateTime?
   tokenBalance      Int                @default(0)
+  isPremium         Boolean            @default(false)
+  premiumExpiresAt  DateTime?
+  isBanned          Boolean?           @default(false)
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
   
@@ -69,6 +72,7 @@ model User {
   tryOutAttempts    TryOutAttempt[]
   dailyLogs         DailyQuestionLog[]
   payments          Payment[]
+  voucherUsages     VoucherUsage[]
 
   @@unique([email])
   @@map("user")
@@ -169,7 +173,7 @@ model Subtest {
 
 model Question {
   id            String       @id @default(cuid())
-  subtestId     String       @map("subtest_id")
+  subtestId     String?      @map("subtest_id")
   type          QuestionType
   imageUrl      String?      @db.Text
   narration     String?      @db.Text
@@ -178,7 +182,7 @@ model Question {
   points        Int          @default(1)
   correctAnswer String?      @map("correct_answer_short_answer")
 
-  subtest     Subtest            @relation(fields: [subtestId], references: [id])
+  subtest     Subtest?           @relation(fields: [subtestId], references: [id])
   items       QuestionItem[]
   dailyLogs   DailyQuestionLog[]
   userAnswers UserAnswer[]
@@ -229,11 +233,48 @@ model Payment {
   snapToken      String?
   metadata       Json?
   
+  voucherId      String?
+  voucherCode    String?
+  discountAmount Int           @default(0)
+  originalAmount Int?
+
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
-  user         User         @relation(fields: [userId], references: [id])
-  tokenPackage TokenPackage @relation(fields: [tokenPackageId], references: [id])
+  user         User          @relation(fields: [userId], references: [id])
+  tokenPackage TokenPackage  @relation(fields: [tokenPackageId], references: [id])
+  voucher      Voucher?      @relation(fields: [voucherId], references: [id])
+}
+
+model Voucher {
+  id              String         @id @default(cuid())
+  code            String         @unique
+  discountPercent Int
+  maxDiscount     Int?
+  minPurchase     Int            @default(0)
+  maxUsage        Int?
+  usedCount       Int            @default(0)
+  isActive        Boolean        @default(true)
+  expiresAt       DateTime?
+  description     String?
+  referrerName    String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  payments        Payment[]
+  usages          VoucherUsage[]
+}
+
+model VoucherUsage {
+  id         String   @id @default(cuid())
+  voucherId  String
+  userId     String
+  paymentId  String?
+  discount   Int
+  createdAt  DateTime @default(now())
+
+  voucher Voucher @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model UnlockedSolution {

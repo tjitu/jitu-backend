@@ -94,6 +94,11 @@ export class ProfileService {
         tokenBalance: user.tokenBalance,
         target: user.target,
         hasPassword,
+        isPremium: Boolean(
+          user.isPremium &&
+            (!user.premiumExpiresAt || user.premiumExpiresAt > new Date()),
+        ),
+        premiumExpiresAt: user.premiumExpiresAt || null,
       },
       stats: {
         totalTryout: stats._count._all || 0,

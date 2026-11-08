@@ -88,7 +88,12 @@ export class DashboardService {
       await Promise.all([
         this.prisma.user.findUnique({
           where: { id: userId },
-          select: { tokenBalance: true, currentStreak: true },
+          select: {
+            tokenBalance: true,
+            currentStreak: true,
+            isPremium: true,
+            premiumExpiresAt: true,
+          },
         }),
         this.prisma.tryOutAttempt.findFirst({
           where: { userId, status: TryoutStatus.FINISHED },
@@ -121,6 +126,11 @@ export class DashboardService {
       totalFinished: totalFinished,
       tokenBalance: user?.tokenBalance || 0,
       currentStreak: user?.currentStreak || 0,
+      isPremium: Boolean(
+        user?.isPremium &&
+          (!user?.premiumExpiresAt || user.premiumExpiresAt > new Date()),
+      ),
+      premiumExpiresAt: user?.premiumExpiresAt || null,
     };
   }
 

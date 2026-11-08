@@ -147,11 +147,23 @@ export class TryoutService {
     });
     if (existingUnlock) return { message: 'Pembahasan sudah terbuka' };
 
-    // 2. Cek saldo user
+    // 2. Cek saldo & status premium user
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { tokenBalance: true },
+      select: { tokenBalance: true, isPremium: true, premiumExpiresAt: true },
     });
+
+    const isUserPremium = Boolean(
+      user?.isPremium &&
+        (!user?.premiumExpiresAt || user.premiumExpiresAt > new Date()),
+    );
+
+    // Premium Pass user gets solutions unlocked without spending coins
+    if (isUserPremium) {
+      return await this.prisma.unlockedSolution.create({
+        data: { userId, tryOutId: tryoutId },
+      });
+    }
 
     if (!user || user.tokenBalance < tryout.solutionPrice) {
       throw new BadRequestException('Saldo Token tidak mencukupi');
@@ -287,7 +299,23 @@ export class TryoutService {
         : 0;
     }
 
+    const user = userId
+      ? await this.prisma.user.findUnique({
+          where: { id: userId },
+          select: { isPremium: true, premiumExpiresAt: true },
+        })
+      : null;
+    const isUserPremium = Boolean(
+      user?.isPremium &&
+        (!user?.premiumExpiresAt || user.premiumExpiresAt > new Date()),
+    );
+
     const dto = this.mapTryoutToDto(tryout, answeredQuestionIds);
+    if (isUserPremium) {
+      dto.unlockedSolutions = [
+        { id: 'premium-pass', userId, tryOutId: id, unlockedAt: new Date() },
+      ];
+    }
     return {
       ...dto,
       latestFinishedAttemptId,
@@ -489,20 +517,33 @@ export class TryoutService {
     // --- PROTEKSI PEMBAHASAN BERBAYAR ---
     let showSolution = false;
     if (isReviewMode) {
-      const tryout = await this.prisma.tryOut.findUnique({
-        where: { id: tryOutId },
-        select: { solutionPrice: true },
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { isPremium: true, premiumExpiresAt: true },
       });
+      const isUserPremium = Boolean(
+        user?.isPremium &&
+          (!user?.premiumExpiresAt || user.premiumExpiresAt > new Date()),
+      );
 
-      if (tryout && tryout.solutionPrice > 0) {
-        const unlocked = await this.prisma.unlockedSolution.findFirst({
-          where: { userId, tryOutId },
+      if (isUserPremium) {
+        showSolution = true;
+      } else {
+        const tryout = await this.prisma.tryOut.findUnique({
+          where: { id: tryOutId },
+          select: { solutionPrice: true },
         });
-        if (unlocked) {
+
+        if (tryout && tryout.solutionPrice > 0) {
+          const unlocked = await this.prisma.unlockedSolution.findFirst({
+            where: { userId, tryOutId },
+          });
+          if (unlocked) {
+            showSolution = true;
+          }
+        } else if (tryout && tryout.solutionPrice <= 0) {
           showSolution = true;
         }
-      } else if (tryout && tryout.solutionPrice <= 0) {
-        showSolution = true;
       }
     }
 

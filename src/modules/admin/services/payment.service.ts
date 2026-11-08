@@ -90,6 +90,7 @@ export class AdminPaymentService {
   async confirmPayment(paymentId: string) {
     const payment = await this.prisma.payment.findUnique({
       where: { id: paymentId },
+      include: { tokenPackage: true },
     });
 
     if (!payment) {
@@ -110,11 +111,37 @@ export class AdminPaymentService {
         data: { status: PaymentStatus.CONFIRMED },
       });
 
-      // 2. Tambah Token User
+      const pkgName =
+        payment.tokenPackage?.name ||
+        (payment.metadata as any)?.package_name ||
+        '';
+      const isPass = pkgName.toLowerCase().includes('pass');
+
+      const currentUser = await tx.user.findUnique({
+        where: { id: payment.userId },
+        select: { premiumExpiresAt: true },
+      });
+
+      const now = new Date();
+      let newPremiumExpiresAt: Date | undefined = undefined;
+      if (isPass) {
+        const baseDate =
+          currentUser?.premiumExpiresAt && currentUser.premiumExpiresAt > now
+            ? currentUser.premiumExpiresAt
+            : now;
+        newPremiumExpiresAt = new Date(
+          baseDate.getTime() + 30 * 24 * 60 * 60 * 1000,
+        );
+      }
+
+      // 2. Tambah Token User & Update status Premium jika Pass
       await tx.user.update({
         where: { id: payment.userId },
         data: {
           tokenBalance: { increment: payment.tokenAmount },
+          ...(isPass
+            ? { isPremium: true, premiumExpiresAt: newPremiumExpiresAt }
+            : {}),
         },
       });
 
@@ -127,6 +154,27 @@ export class AdminPaymentService {
           referenceId: `PAYMENT_ID: ${paymentId}`,
         },
       });
+
+      // 4. Update Voucher usage if used
+      if (payment.voucherId) {
+        await tx.voucher
+          .update({
+            where: { id: payment.voucherId },
+            data: { usedCount: { increment: 1 } },
+          })
+          .catch(() => undefined);
+
+        await tx.voucherUsage
+          .create({
+            data: {
+              voucherId: payment.voucherId,
+              userId: payment.userId,
+              paymentId: payment.id,
+              discount: payment.discountAmount || 0,
+            },
+          })
+          .catch(() => undefined);
+      }
 
       return updatedPayment;
     });

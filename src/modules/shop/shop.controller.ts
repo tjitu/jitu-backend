@@ -62,22 +62,43 @@ export class ShopController {
     return this.shopService.cancelPayment(session.user.id, paymentId);
   }
 
+  @Post('voucher/validate')
+  @UseGuards(AuthGuard)
+  async validateVoucher(
+    @Session() session: UserSession,
+    @Body() body: { code: string; packageId: string },
+  ) {
+    if (!body?.code || !body?.packageId) {
+      throw new BadRequestException('Kode voucher dan ID paket wajib diisi');
+    }
+    return this.shopService.validateVoucher(
+      body.code,
+      body.packageId,
+      session.user.id,
+    );
+  }
+
   @Post('create/:packageId')
   @UseGuards(AuthGuard)
   async createTransaction(
     @Session() session: UserSession,
     @Param('packageId') packageId: string,
+    @Body() body?: { voucherCode?: string },
     @Query('callback_url') callbackUrl?: string,
+    @Query('voucher_code') voucherCodeQuery?: string,
   ) {
     if (!packageId) {
       throw new BadRequestException('Package ID required');
     }
+
+    const voucherCode = body?.voucherCode || voucherCodeQuery;
 
     // Now uses Midtrans e-wallet instead of static QRIS
     const res = await this.shopService.createEWalletPayment(
       session.user.id,
       packageId,
       callbackUrl,
+      voucherCode,
     );
     return res;
   }
