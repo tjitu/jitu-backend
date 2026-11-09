@@ -258,7 +258,7 @@ export class ExamService {
       return selectedItem?.isCorrect ?? false;
     }
 
-    // For short answer: compare text against correct answer key
+    // For short answer: compare text against correct answer key with tolerant normalization
     if (answer.inputText !== null) {
       const question = await this.prisma.question.findUnique({
         where: { id: answer.questionId },
@@ -269,9 +269,7 @@ export class ExamService {
         return false;
       }
 
-      const userAnswer = answer.inputText.trim().toLowerCase();
-      const correctKey = question.correctAnswer.trim().toLowerCase();
-      return userAnswer === correctKey;
+      return this.checkShortAnswer(answer.inputText, question.correctAnswer);
     }
 
     return false;
@@ -320,5 +318,47 @@ export class ExamService {
         finishedAt: new Date(),
       },
     });
+  }
+
+  private checkShortAnswer(rawUser: string, rawKey: string): boolean {
+    if (!rawUser || !rawKey) return false;
+    const user = String(rawUser).trim().toLowerCase();
+    const key = String(rawKey).trim().toLowerCase();
+
+    // 1. Direct match (case-insensitive & trimmed)
+    if (user === key) return true;
+
+    // 2. Strip trailing punctuation (e.g. "42.", "42,", "42;")
+    const userNoPunct = user.replace(/[.,;]+$/, '').trim();
+    const keyNoPunct = key.replace(/[.,;]+$/, '').trim();
+    if (userNoPunct === keyNoPunct) return true;
+
+    // 3. Strip common algebraic prefixes (e.g. "x = 42" or "= 42")
+    const strippedUser = userNoPunct.replace(/^[a-z]\s*=\s*/, '').replace(/^=\s*/, '').trim();
+    if (strippedUser === keyNoPunct) return true;
+
+    // 4. Numeric normalization (handles thousand separators, spaces, and decimal commas)
+    const normKey = keyNoPunct.replace(/\s+/g, '');
+    const normUser = strippedUser.replace(/\s+/g, '');
+
+    const parseNum = (val: string): number | null => {
+      if (/^-?\d{1,3}([.,]\d{3})+$/.test(val)) {
+        const cleaned = val.replace(/[.,]/g, '');
+        const n = Number(cleaned);
+        return Number.isFinite(n) ? n : null;
+      }
+      const standardDecimal = val.replace(',', '.');
+      const n = Number(standardDecimal);
+      return Number.isFinite(n) ? n : null;
+    };
+
+    const keyNum = parseNum(normKey);
+    const userNum = parseNum(normUser);
+
+    if (keyNum !== null && userNum !== null) {
+      return Math.abs(keyNum - userNum) < 1e-6;
+    }
+
+    return false;
   }
 }

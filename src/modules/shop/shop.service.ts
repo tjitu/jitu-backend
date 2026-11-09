@@ -60,11 +60,76 @@ export class ShopService {
     return Math.round(notificationAmount * 100) === amount * 100;
   }
 
+  private async getActiveDiscounts() {
+    try {
+      const rows = await this.prisma.$queryRaw<Array<{
+        id: string;
+        name: string;
+        type: string;
+        value: number;
+        startDate: Date;
+        endDate: Date;
+        packageId: string | null;
+        badgeText: string;
+        badgeStyle: string;
+        isActive: boolean;
+      }>>`
+        SELECT "id", "name", "type", "value", "startDate", "endDate",
+               "packageId", "badgeText", "badgeStyle", "isActive"
+        FROM public."Discount"
+        WHERE "isActive" = true
+          AND "startDate" <= CURRENT_TIMESTAMP
+          AND "endDate" >= CURRENT_TIMESTAMP
+        ORDER BY "createdAt" DESC
+      `;
+      return Array.isArray(rows) ? rows : [];
+    } catch {
+      return [];
+    }
+  }
+
   // Ambil daftar paket dari database
   async getPackages() {
-    return this.prisma.tokenPackage.findMany({
+    const packages = await this.prisma.tokenPackage.findMany({
       where: { isActive: true },
       orderBy: { price: 'asc' },
+    });
+
+    const activeDiscounts = await this.getActiveDiscounts();
+
+    return packages.map((pkg) => {
+      // Find matching discount: package-specific first, then global
+      const discount = activeDiscounts.find((d) => d.packageId === pkg.id)
+        || activeDiscounts.find((d) => !d.packageId);
+
+      if (!discount) {
+        return {
+          ...pkg,
+          originalPrice: pkg.price,
+          finalPrice: pkg.price,
+          savings: 0,
+        };
+      }
+
+      const discountCut = discount.type === 'PERCENTAGE'
+        ? Math.round((pkg.price * Number(discount.value)) / 100)
+        : Math.round(Number(discount.value));
+      const finalPrice = Math.max(1000, pkg.price - discountCut);
+      const savings = pkg.price - finalPrice;
+
+      return {
+        ...pkg,
+        price: finalPrice,
+        originalPrice: pkg.price,
+        finalPrice,
+        savings,
+        discountAmount: savings,
+        discountPercent: Math.round((savings / pkg.price) * 100),
+        badgeText: discount.badgeText,
+        badgeStyle: discount.badgeStyle,
+        campaignName: discount.name,
+        discountId: discount.id,
+      };
     });
   }
 
@@ -262,7 +327,19 @@ export class ShopService {
       );
     }
 
-    if (voucher.minPurchase > 0 && selectedPackage.price < voucher.minPurchase) {
+    const activeDiscounts = await this.getActiveDiscounts();
+    const appliedDiscount = activeDiscounts.find((d) => d.packageId === selectedPackage.id)
+      || activeDiscounts.find((d) => !d.packageId);
+
+    let effectivePrice = selectedPackage.price;
+    if (appliedDiscount) {
+      const discountCut = appliedDiscount.type === 'PERCENTAGE'
+        ? Math.round((selectedPackage.price * Number(appliedDiscount.value)) / 100)
+        : Math.round(Number(appliedDiscount.value));
+      effectivePrice = Math.max(1000, selectedPackage.price - discountCut);
+    }
+
+    if (voucher.minPurchase > 0 && effectivePrice < voucher.minPurchase) {
       throw new BadRequestException(
         `Minimal pembelian untuk kode ini adalah Rp ${voucher.minPurchase.toLocaleString('id-ID')}.`,
       );
@@ -270,12 +347,12 @@ export class ShopService {
 
     // 3. Calculate discount
     let discountAmount = Math.round(
-      (selectedPackage.price * voucher.discountPercent) / 100,
+      (effectivePrice * voucher.discountPercent) / 100,
     );
     if (voucher.maxDiscount && discountAmount > voucher.maxDiscount) {
       discountAmount = voucher.maxDiscount;
     }
-    const finalPrice = Math.max(0, selectedPackage.price - discountAmount);
+    const finalPrice = Math.max(0, effectivePrice - discountAmount);
 
     return {
       valid: true,
@@ -283,7 +360,7 @@ export class ShopService {
       code: voucher.code,
       discountPercent: voucher.discountPercent,
       discountAmount,
-      originalPrice: selectedPackage.price,
+      originalPrice: effectivePrice,
       finalPrice,
       description: voucher.description || `Diskon ${voucher.discountPercent}%`,
       referrerName: voucher.referrerName,
@@ -324,11 +401,23 @@ export class ShopService {
       );
     }
 
+    // Check if package has an active campaign discount
+    const activeDiscounts = await this.getActiveDiscounts();
+    const appliedDiscount = activeDiscounts.find((d) => d.packageId === selectedPackage.id)
+      || activeDiscounts.find((d) => !d.packageId);
+
+    let packageEffectivePrice = selectedPackage.price;
+    if (appliedDiscount) {
+      const discountCut = appliedDiscount.type === 'PERCENTAGE'
+        ? Math.round((selectedPackage.price * Number(appliedDiscount.value)) / 100)
+        : Math.round(Number(appliedDiscount.value));
+      packageEffectivePrice = Math.max(1000, selectedPackage.price - discountCut);
+    }
+
     // Apply voucher if provided
     let voucherId: string | null = null;
     let appliedVoucherCode: string | null = null;
-    let discountAmount = 0;
-    let finalPrice = selectedPackage.price;
+    let finalPrice = packageEffectivePrice;
 
     if (voucherCode && voucherCode.trim()) {
       const vResult = await this.validateVoucher(
@@ -338,9 +427,10 @@ export class ShopService {
       );
       voucherId = vResult.voucherId;
       appliedVoucherCode = vResult.code;
-      discountAmount = vResult.discountAmount;
       finalPrice = vResult.finalPrice;
     }
+
+    const discountAmount = Math.max(0, selectedPackage.price - finalPrice);
 
     // Generate unique order ID
     const orderId = `ORDER-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
