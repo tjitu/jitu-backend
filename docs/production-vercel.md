@@ -21,6 +21,8 @@ Vercel detects this NestJS app from `src/main.ts` and deploys it as a Node.js Fu
 
 Firebase ID tokens are verified using the Firebase project ID and Google's public signing certificates; the backend does not need a service-account key.
 
+The public API health endpoints are `GET /health` for liveness and `GET /health/ready` for database readiness. When called through the Main website, the Next.js rewrite exposes database readiness at `/api/proxy/health/ready`.
+
 Keep production data in Supabase and uploaded files in Cloudinary. Vercel Functions have a 4.5 MB request/response body limit, so oversized image uploads may need to be sent directly from the frontend to Cloudinary.
 
 ## Supabase schema and migrations

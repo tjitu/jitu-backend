@@ -14,6 +14,7 @@ import { AdminModule } from './modules/admin/admin.module';
 import { ProfileModule } from './modules/profile/profile.module';
 import { ArticlesModule } from './modules/articles/articles.module';
 import { AuthModule as CustomAuthModule } from './modules/auth/auth.module';
+import { HealthController } from './health.controller';
 
 @Module({
   imports: [
@@ -34,7 +35,7 @@ import { AuthModule as CustomAuthModule } from './modules/auth/auth.module';
     ProfileModule,
     ArticlesModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController, HealthController],
   providers: [AppService],
 })
 export class AppModule {}
