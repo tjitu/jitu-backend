@@ -37,7 +37,13 @@ export const PaymentStatus = {
   DECLINED: "DECLINED",
 };
 
-export const Prisma = {};
+export const Prisma = {
+  sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
+    strings: [...strings],
+    values,
+  }),
+  join: (values: unknown[]) => ({ values }),
+};
 
 export class PrismaClient {
   user = {};

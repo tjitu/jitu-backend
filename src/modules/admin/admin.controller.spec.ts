@@ -10,6 +10,7 @@ import { AdminPackageService } from './services/package.service';
 import { AdminDailyService } from './services/daily.service';
 import { AdminTryoutResultService } from './services/result.service';
 import { AdminAiService } from './services/ai.service';
+import { AuthIdentityService } from '../auth/auth-identity.service';
 
 describe('AdminController', () => {
   let controller: AdminController;
@@ -18,6 +19,7 @@ describe('AdminController', () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AdminController],
       providers: [
+        { provide: AuthIdentityService, useValue: {} },
         { provide: AdminService, useValue: {} },
         { provide: AdminTryoutService, useValue: {} },
         { provide: AdminSubtestService, useValue: {} },

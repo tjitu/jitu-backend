@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from '../../prisma.service';
@@ -8,6 +8,17 @@ export type TryoutCurationStatus =
   | 'QC_SANDBOX'
   | 'NEEDS_REVISION'
   | 'PUBLISHED';
+
+function postgresErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const value = error as {
+    code?: unknown;
+    meta?: { code?: unknown };
+    cause?: { code?: unknown };
+  };
+  const code = value.code ?? value.meta?.code ?? value.cause?.code;
+  return typeof code === 'string' ? code : undefined;
+}
 
 /** Fetches curation_status for given tryout IDs cleanly even if schema migration ran out-of-band. */
 export async function getTryoutCurationMap(
@@ -32,10 +43,15 @@ export async function getTryoutCurationMap(
         .trim() as TryoutCurationStatus;
       map.set(row.id, normalized);
     }
-  } catch {
-    for (const id of cleanIds) {
-      map.set(id, 'PUBLISHED');
+  } catch (error) {
+    // Older production databases may not have been initialized by Control Center yet.
+    // In that specific case the legacy behavior is that existing tryouts are published.
+    if (postgresErrorCode(error) !== '42703') {
+      throw new ServiceUnavailableException(
+        'Status kurasi tryout sedang tidak tersedia.',
+      );
     }
+    for (const id of cleanIds) map.set(id, 'PUBLISHED');
   }
 
   return map;
@@ -67,30 +83,34 @@ export async function canAccessTryoutSandbox(
     }
   }
 
+  if (!tryoutId) return false;
+
+  return (await getSandboxPreviewTryoutId(prisma, sandboxToken)) === tryoutId;
+}
+
+/** Returns the single tryout a valid preview token is scoped to. */
+export async function getSandboxPreviewTryoutId(
+  prisma: PrismaService,
+  sandboxToken?: string | null,
+): Promise<string | null> {
   const cleanToken = String(sandboxToken || '').trim();
   if (/^[a-f0-9]{64}$/i.test(cleanToken)) {
     const tokenHash = createHash('sha256').update(cleanToken).digest('hex');
     try {
-      const sessionRows = await prisma.$queryRaw<
-        Array<{ tryoutId: string | null }>
-      >(
+      const sessionRows = await prisma.$queryRaw<Array<{ tryoutId: string | null }>>(
         Prisma.sql`SELECT "tryout_id" AS "tryoutId"
          FROM public."QcSandboxPreviewSession"
          WHERE "token_hash" = ${tokenHash} AND "expires_at" > CURRENT_TIMESTAMP
          LIMIT 1`,
       );
       const session = sessionRows[0];
-      if (session) {
-        if (!tryoutId || !session.tryoutId || session.tryoutId === tryoutId) {
-          return true;
-        }
-      }
+      return session?.tryoutId ?? null;
     } catch {
-      return false;
+      return null;
     }
   }
 
-  return false;
+  return null;
 }
 
 /** Returns user IDs marked as sandbox QA accounts so they can be hidden from student leaderboards. */
@@ -102,8 +122,11 @@ export async function getSandboxUserIdSet(
       Prisma.sql`SELECT "id" FROM public."user" WHERE COALESCE("isSandbox", false) = true`,
     );
     return new Set(rows.map((r) => r.id));
-  } catch {
-    return new Set();
+  } catch (error) {
+    if (postgresErrorCode(error) === '42703') return new Set();
+    throw new ServiceUnavailableException(
+      'Status akun Sandbox sedang tidak tersedia.',
+    );
   }
 }
 
@@ -118,7 +141,7 @@ export async function resolveTryoutAccess(
     getTryoutCurationMap(prisma, [tryoutId]),
     canAccessTryoutSandbox(prisma, userId, tryoutId, sandboxToken),
   ]);
-  const curationStatus = curationMap.get(tryoutId) ?? 'PUBLISHED';
+  const curationStatus = curationMap.get(tryoutId) ?? 'DRAFT';
 
   if (curationStatus === 'PUBLISHED') {
     return { curationStatus, canSandbox };

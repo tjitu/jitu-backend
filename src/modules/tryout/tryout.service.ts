@@ -18,6 +18,7 @@ import { ExamService } from '../exam/exam.service';
 import {
   canAccessTryoutSandbox,
   getSandboxUserIdSet,
+  getSandboxPreviewTryoutId,
   getTryoutCurationMap,
   resolveTryoutAccess,
 } from './tryout-curation.helper';
@@ -210,15 +211,17 @@ export class TryoutService {
     userId?: string,
     sandboxToken?: string,
   ): Promise<TryOutCardDto[]> {
-    const canSandbox = await canAccessTryoutSandbox(
-      this.prisma,
-      userId,
-      undefined,
-      sandboxToken,
-    );
+    const [canSandbox, previewTryoutId] = await Promise.all([
+      canAccessTryoutSandbox(this.prisma, userId),
+      getSandboxPreviewTryoutId(this.prisma, sandboxToken),
+    ]);
 
     const tryouts = await this.prisma.tryOut.findMany({
-      where: canSandbox ? undefined : { isPublic: true },
+      where: canSandbox
+        ? undefined
+        : previewTryoutId
+          ? { OR: [{ isPublic: true }, { id: previewTryoutId }] }
+          : { isPublic: true },
       include: {
         _count: { select: { attempts: true } },
         // Include attempts only if a user is logged in
@@ -233,14 +236,15 @@ export class TryoutService {
     );
 
     const visibleTryouts = tryouts.filter((t) => {
-      const status = curationMap.get(t.id) ?? 'PUBLISHED';
+      const status = curationMap.get(t.id) ?? 'DRAFT';
       if (status === 'PUBLISHED' && t.isPublic) return true;
-      if (canSandbox && status !== 'PUBLISHED') return true;
+      if (canSandbox) return true;
+      if (previewTryoutId === t.id && status !== 'PUBLISHED') return true;
       return false;
     });
 
     const result = visibleTryouts.map((t) => {
-      const curationStatus = curationMap.get(t.id) ?? 'PUBLISHED';
+      const curationStatus = curationMap.get(t.id) ?? 'DRAFT';
       const isRegistered = t.attempts ? t.attempts.length > 0 : false;
       return {
         id: t.id,
@@ -553,7 +557,7 @@ export class TryoutService {
 
       if (now > expiryTime || scheduleEnded) {
         // Gunakan ExamService untuk finish agar logic skor konsisten
-        currentAttempt = await this.examService.finishExam(currentAttempt.id);
+        currentAttempt = await this.examService.finishExam(currentAttempt.id, userId);
 
         // Reload attempt dengan relation yang dibutuhkan
         currentAttempt = await this.prisma.tryOutAttempt.findUnique({

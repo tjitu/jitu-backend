@@ -53,8 +53,9 @@ export class ExamController {
   async startSubtest(
     @Param('attemptId') attemptId: string,
     @Body('subtestOrder') subtestOrder: number,
+    @Session() session: UserSession,
   ) {
-    return this.examService.startSubtest(attemptId, subtestOrder);
+    return this.examService.startSubtest(attemptId, subtestOrder, session.user.id);
   }
 
   @Post(':attemptId/answer')
@@ -66,9 +67,11 @@ export class ExamController {
       answerId?: string;
       inputText?: string;
     },
+    @Session() session: UserSession,
   ) {
     return this.examService.saveAnswer(
       attemptId,
+      session.user.id,
       answerData.questionId,
       answerData.answerId,
       answerData.inputText,
@@ -79,15 +82,16 @@ export class ExamController {
   streamExamStatus(
     @Param('attemptId') attemptId: string,
     @Param('order') order: string, // Ambil parameter order
+    @Session() session: UserSession,
   ): Observable<MessageEvent> {
-    return this.examService.getExamStream(attemptId, Number(order));
+    return this.examService.getExamStream(attemptId, Number(order), session.user.id);
   }
 
 
 
   @Post(':attemptId/finish')
-  async finish(@Param('attemptId') attemptId: string) {
-    return this.examService.finishExam(attemptId);
+  async finish(@Param('attemptId') attemptId: string, @Session() session: UserSession) {
+    return this.examService.finishExam(attemptId, session.user.id);
   }
 
   @Get('ping')

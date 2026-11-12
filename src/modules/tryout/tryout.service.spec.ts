@@ -4,12 +4,19 @@ import { PrismaService } from '../../prisma.service';
 import { ExamService } from '../exam/exam.service';
 
 const prismaMock = {
+  $queryRaw: jest.fn().mockResolvedValue([
+    { id: 'cku1tryout1', curationStatus: 'PUBLISHED' },
+    { id: 'cku1tryout2', curationStatus: 'PUBLISHED' },
+  ]),
   tryOut: {
     findMany: jest.fn(),
     findUnique: jest.fn(),
   },
   tryOutAttempt: {
     findFirst: jest.fn(),
+  },
+  user: {
+    findUnique: jest.fn().mockResolvedValue(null),
   },
   userAnswer: {
     findMany: jest.fn(),
@@ -82,10 +89,15 @@ describe('TryoutService', () => {
 
     service = module.get<TryoutService>(TryoutService);
 
+    prismaMock.$queryRaw.mockReset().mockResolvedValue([
+      { id: 'cku1tryout1', curationStatus: 'PUBLISHED' },
+      { id: 'cku1tryout2', curationStatus: 'PUBLISHED' },
+    ]);
     prismaMock.tryOut.findMany.mockClear();
     prismaMock.tryOut.findUnique.mockClear();
     prismaMock.tryOutAttempt.findFirst.mockClear();
     prismaMock.userAnswer.findMany.mockClear();
+    prismaMock.user.findUnique.mockResolvedValue(null);
   });
 
   describe('getTryouts', () => {
@@ -108,6 +120,10 @@ describe('TryoutService', () => {
         solutionPrice: 0,
         isPublic: true,
         isRegistered: false,
+        curationStatus: 'PUBLISHED',
+        isSandboxPreview: false,
+        scheduledStart: '2025-01-10T08:00:00.000Z',
+        scheduledEnd: null,
       });
 
       // Verifikasi Item 2
@@ -121,7 +137,30 @@ describe('TryoutService', () => {
         solutionPrice: 30000,
         isPublic: true,
         isRegistered: false,
+        curationStatus: 'PUBLISHED',
+        isSandboxPreview: false,
+        scheduledStart: '2025-01-17T08:00:00.000Z',
+        scheduledEnd: null,
       });
+    });
+
+    it('only exposes the unpublished tryout scoped to a preview token', async () => {
+      prismaMock.$queryRaw
+        .mockResolvedValueOnce([{ tryoutId: 'cku1tryout1' }])
+        .mockResolvedValueOnce([
+          { id: 'cku1tryout1', curationStatus: 'QC_SANDBOX' },
+          { id: 'cku1tryout2', curationStatus: 'DRAFT' },
+        ]);
+      prismaMock.tryOut.findMany.mockResolvedValue(mockTryoutsComplete);
+
+      const result = await service.getTryouts(undefined, 'a'.repeat(64));
+
+      expect(result.map((tryout) => tryout.id)).toEqual(['cku1tryout1']);
+      expect(prismaMock.tryOut.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { OR: [{ isPublic: true }, { id: 'cku1tryout1' }] },
+        }),
+      );
     });
   });
 
@@ -178,6 +217,8 @@ describe('TryoutService', () => {
         latestAttemptId: null,
         currentSubtestOrder: 1,
         latestScore: 0,
+        curationStatus: 'PUBLISHED',
+        isSandboxPreview: false,
         categories: [
           {
             id: 1,

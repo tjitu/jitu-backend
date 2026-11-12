@@ -87,6 +87,8 @@
       "<rootDir>/test/jest.setup.ts"
     ],
     "moduleNameMapper": {
+      "^firebase-admin/app$": "<rootDir>/test/firebase-admin-app.stub.ts",
+      "^firebase-admin/auth$": "<rootDir>/test/firebase-admin-auth.stub.ts",
       "^generated/prisma/client$": "<rootDir>/test/prisma-client.stub.ts",
       "^generated/prisma/enums$": "<rootDir>/test/prisma-client.stub.ts",
       "^src/prisma.service$": "<rootDir>/prisma.service.ts",

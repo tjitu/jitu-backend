@@ -3,6 +3,12 @@ import { ExamService } from './exam.service';
 import { PrismaService } from '../../prisma.service';
 
 const prismaMock = {
+  $queryRaw: jest.fn().mockResolvedValue([
+    { id: 'tryout-1', curationStatus: 'PUBLISHED' },
+  ]),
+  subtest: {
+    findMany: jest.fn(),
+  },
   tryOutAttempt: {
     findFirst: jest.fn(),
     create: jest.fn(),
@@ -15,6 +21,7 @@ const prismaMock = {
   },
   question: {
     findUnique: jest.fn(),
+    findFirst: jest.fn(),
   },
 
   userAnswer: {
@@ -69,6 +76,9 @@ describe('ExamService', () => {
     it('should mark a registered NOT_STARTED attempt as IN_PROGRESS', async () => {
       const attempt = { id: 'attempt-2', status: 'NOT_STARTED' };
       const updatedAttempt = { ...attempt, status: 'IN_PROGRESS' };
+      prismaMock.subtest.findMany.mockResolvedValue([
+        { order: 1, _count: { questions: 4 } },
+      ]);
       prismaMock.tryOutAttempt.findFirst.mockResolvedValue(attempt);
       prismaMock.tryOutAttempt.update.mockResolvedValue(updatedAttempt);
 
@@ -83,6 +93,11 @@ describe('ExamService', () => {
           currentSubtestOrder: 1,
         },
       });
+      expect(prismaMock.subtest.findMany).toHaveBeenCalledWith({
+        where: { tryOutId: 'tryout-1' },
+        orderBy: { order: 'asc' },
+        include: { _count: { select: { questions: true } } },
+      });
       expect(result).toEqual(updatedAttempt);
     });
   });
@@ -91,13 +106,18 @@ describe('ExamService', () => {
     beforeEach(() => {
       prismaMock.tryOutAttempt.findUnique.mockResolvedValue({
         id: 'attempt-1',
+        userId: 'user-1',
+        tryOutId: 'tryout-1',
+        currentSubtestOrder: 1,
         status: 'IN_PROGRESS',
       });
+      prismaMock.question.findFirst.mockResolvedValue({ id: 'q-1' });
     });
 
     it('should save selected item without grading immediately', async () => {
       prismaMock.questionItem.findUnique.mockResolvedValue({
         id: 'opt-B',
+        questionId: 'q-1',
         isCorrect: true,
       });
 
@@ -105,7 +125,7 @@ describe('ExamService', () => {
 
       prismaMock.userAnswer.upsert.mockResolvedValue(mockSavedAnswer);
 
-      const result = await service.saveAnswer('attempt-1', 'q-1', 'opt-B');
+      const result = await service.saveAnswer('attempt-1', 'user-1', 'q-1', 'opt-B');
 
       expect(prismaMock.userAnswer.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -123,14 +143,40 @@ describe('ExamService', () => {
       expect(result.isCorrect).toBe(false);
     });
 
+    it('does not save answers to another user\'s attempt', async () => {
+      prismaMock.tryOutAttempt.findUnique.mockResolvedValue({
+        id: 'attempt-1',
+        userId: 'another-user',
+        status: 'IN_PROGRESS',
+      });
+
+      await expect(
+        service.saveAnswer('attempt-1', 'user-1', 'q-1', 'opt-B'),
+      ).rejects.toThrow('Kamu tidak memiliki akses ke sesi tryout ini.');
+      expect(prismaMock.userAnswer.upsert).not.toHaveBeenCalled();
+    });
+
+    it('rejects answer options belonging to another question', async () => {
+      prismaMock.questionItem.findUnique.mockResolvedValue({
+        id: 'opt-B',
+        questionId: 'q-2',
+      });
+
+      await expect(
+        service.saveAnswer('attempt-1', 'user-1', 'q-1', 'opt-B'),
+      ).rejects.toThrow('Pilihan jawaban tidak valid untuk soal q-1.');
+      expect(prismaMock.userAnswer.upsert).not.toHaveBeenCalled();
+    });
+
     it('should throw if attempt is already finished', async () => {
       prismaMock.tryOutAttempt.findUnique.mockResolvedValue({
         id: 'attempt-1',
+        userId: 'user-1',
         status: 'FINISHED',
       });
 
       await expect(
-        service.saveAnswer('attempt-1', 'q-1', 'opt-A'),
+        service.saveAnswer('attempt-1', 'user-1', 'q-1', 'opt-A'),
       ).rejects.toThrow('Ujian sudah selesai, tidak bisa menyimpan jawaban.');
       expect(prismaMock.userAnswer.upsert).not.toHaveBeenCalled();
     });
@@ -139,13 +185,17 @@ describe('ExamService', () => {
       prismaMock.questionItem.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.saveAnswer('attempt-1', 'q-1', 'invalid-opt'),
-      ).rejects.toThrow('ID Pilihan jawaban tidak ditemukan: invalid-opt');
+        service.saveAnswer('attempt-1', 'user-1', 'q-1', 'invalid-opt'),
+      ).rejects.toThrow('Pilihan jawaban tidak valid untuk soal q-1.');
     });
   });
 
   describe('finishExam', () => {
     it('should grade all answers and update attempt status to FINISHED', async () => {
+      prismaMock.tryOutAttempt.findUnique.mockResolvedValue({
+        userId: 'user-1',
+        status: 'IN_PROGRESS',
+      });
       const finishedAttempt = {
         id: 'attempt-1',
         status: 'FINISHED',
@@ -174,7 +224,7 @@ describe('ExamService', () => {
 
       prismaMock.tryOutAttempt.update.mockResolvedValue(finishedAttempt);
 
-      const result = await service.finishExam('attempt-1');
+      const result = await service.finishExam('attempt-1', 'user-1');
 
       expect(prismaMock.userAnswer.findMany).toHaveBeenCalledWith({
         where: { tryOutAttemptId: 'attempt-1' },
@@ -199,6 +249,39 @@ describe('ExamService', () => {
         },
       });
       expect(result).toEqual(finishedAttempt);
+    });
+
+    it('does not finish another user\'s attempt', async () => {
+      prismaMock.tryOutAttempt.findUnique.mockResolvedValue({
+        userId: 'another-user',
+        status: 'IN_PROGRESS',
+      });
+
+      await expect(service.finishExam('attempt-1', 'user-1')).rejects.toThrow(
+        'Kamu tidak memiliki akses ke sesi tryout ini.',
+      );
+      expect(prismaMock.userAnswer.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('startSubtest', () => {
+    it('rejects attempts to skip a populated subtest', async () => {
+      prismaMock.tryOutAttempt.findUnique.mockResolvedValue({
+        id: 'attempt-1',
+        userId: 'user-1',
+        tryOutId: 'tryout-1',
+        currentSubtestOrder: 1,
+        status: 'IN_PROGRESS',
+      });
+      prismaMock.subtest.findMany.mockResolvedValue([
+        { order: 2, _count: { questions: 5 } },
+        { order: 3, _count: { questions: 5 } },
+      ]);
+
+      await expect(service.startSubtest('attempt-1', 3, 'user-1')).rejects.toThrow(
+        'Kamu hanya bisa melanjutkan ke subtes berikutnya.',
+      );
+      expect(prismaMock.tryOutAttempt.update).not.toHaveBeenCalled();
     });
   });
 });

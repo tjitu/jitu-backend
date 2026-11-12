@@ -8,6 +8,7 @@ import {
 import { PrismaService } from '../../prisma.service'; // Sesuaikan path ini jika perlu
 import { Observable, of, from } from 'rxjs';
 import { switchMap } from 'rxjs/operators';
+import { throwError } from 'rxjs';
 import { MessageEvent } from './interfaces';
 import { resolveTryoutAccess } from '../tryout/tryout-curation.helper';
 
@@ -73,7 +74,7 @@ export class ExamService {
     );
   }
 
-  async startSubtest(attemptId: string, order: number) {
+  async startSubtest(attemptId: string, order: number, userId: string) {
     // Pastikan attempt valid
     const attempt = await this.prisma.tryOutAttempt.findUnique({
       where: { id: attemptId },
@@ -82,10 +83,27 @@ export class ExamService {
     if (!attempt || attempt.status !== 'IN_PROGRESS') {
       throw new BadRequestException('Attempt tidak valid atau sudah selesai');
     }
+    if (attempt.userId !== userId) {
+      throw new ForbiddenException('Kamu tidak memiliki akses ke sesi tryout ini.');
+    }
 
     // [SECURITY] Cegah reset timer jika user refresh halaman di subtes yang sama
     if (attempt.currentSubtestOrder === order) {
       return attempt;
+    }
+
+    const subtests = await this.prisma.subtest.findMany({
+      where: { tryOutId: attempt.tryOutId },
+      orderBy: { order: 'asc' },
+      include: { _count: { select: { questions: true } } },
+    });
+    const populatedSubtests = subtests.filter((subtest) => subtest._count.questions > 0);
+    const activeSubtests = populatedSubtests.length > 0 ? populatedSubtests : subtests;
+    const nextSubtest = activeSubtests.find(
+      (subtest) => subtest.order > attempt.currentSubtestOrder,
+    );
+    if (!nextSubtest || nextSubtest.order !== order) {
+      throw new ForbiddenException('Kamu hanya bisa melanjutkan ke subtes berikutnya.');
     }
 
     // Update waktu mulai subtes baru
@@ -161,7 +179,7 @@ export class ExamService {
    * Instead of creating per-user interval timers (which causes event loop starvation),
    * we send the endTime and serverTime once. The client handles the countdown.
    */
-  getExamStream(attemptId: string, order: number): Observable<MessageEvent> {
+  getExamStream(attemptId: string, order: number, userId: string): Observable<MessageEvent> {
     return from(
       this.prisma.tryOutAttempt.findUnique({
         where: { id: attemptId },
@@ -174,9 +192,13 @@ export class ExamService {
         },
       }),
     ).pipe(
-      switchMap((attempt) =>
-        of({ data: this.computeTimerPayload(attempt, order) } as MessageEvent),
-      ),
+      switchMap((attempt) => {
+        if (!attempt) return throwError(() => new BadRequestException('Attempt tidak ditemukan'));
+        if (attempt.userId !== userId) {
+          return throwError(() => new ForbiddenException('Kamu tidak memiliki akses ke timer ini.'));
+        }
+        return of({ data: this.computeTimerPayload(attempt, order) } as MessageEvent);
+      }),
     );
   }
 
@@ -190,6 +212,7 @@ export class ExamService {
    */
   async saveAnswer(
     attemptId: string,
+    userId: string,
     questionId: string,
     questionItemId?: string,
     inputText?: string,
@@ -203,11 +226,19 @@ export class ExamService {
       // [SECURITY] Validate attempt status before saving
       const attempt = await this.prisma.tryOutAttempt.findUnique({
         where: { id: attemptId },
-        select: { status: true },
+        select: {
+          status: true,
+          userId: true,
+          tryOutId: true,
+          currentSubtestOrder: true,
+        },
       });
 
       if (!attempt) {
         throw new BadRequestException('Attempt tidak ditemukan');
+      }
+      if (attempt.userId !== userId) {
+        throw new ForbiddenException('Kamu tidak memiliki akses ke sesi tryout ini.');
       }
 
       if (attempt.status === 'FINISHED') {
@@ -215,16 +246,34 @@ export class ExamService {
           'Ujian sudah selesai, tidak bisa menyimpan jawaban.',
         );
       }
+      if (attempt.status !== 'IN_PROGRESS') {
+        throw new BadRequestException('Ujian belum dimulai.');
+      }
+
+      const question = await this.prisma.question.findFirst({
+        where: {
+          id: questionId,
+          subtest: {
+            tryOutId: attempt.tryOutId,
+            order: attempt.currentSubtestOrder,
+          },
+        },
+        select: { id: true },
+      });
+      if (!question) {
+        throw new BadRequestException('Soal tidak termasuk subtes yang sedang dikerjakan.');
+      }
 
       // Validate questionItemId if provided
       if (questionItemId) {
         const selectedItem = await this.prisma.questionItem.findUnique({
           where: { id: questionItemId },
+          select: { id: true, questionId: true },
         });
 
-        if (!selectedItem) {
+        if (!selectedItem || selectedItem.questionId !== questionId) {
           throw new BadRequestException(
-            `ID Pilihan jawaban tidak ditemukan: ${questionItemId}`,
+            `Pilihan jawaban tidak valid untuk soal ${questionId}.`,
           );
         }
       }
@@ -255,7 +304,7 @@ export class ExamService {
 
       return result;
     } catch (error) {
-      if (error instanceof BadRequestException) throw error;
+      if (error instanceof BadRequestException || error instanceof ForbiddenException) throw error;
 
       this.logger.error('Failed to save answer', {
         attemptId,
@@ -308,7 +357,19 @@ export class ExamService {
    * - Answer key corrections after submission are reflected
    * - All answers are graded consistently at exam completion
    */
-  async finishExam(attemptId: string) {
+  async finishExam(attemptId: string, userId: string) {
+    const attempt = await this.prisma.tryOutAttempt.findUnique({
+      where: { id: attemptId },
+      select: { userId: true, status: true },
+    });
+    if (!attempt) throw new BadRequestException('Attempt tidak ditemukan');
+    if (attempt.userId !== userId) {
+      throw new ForbiddenException('Kamu tidak memiliki akses ke sesi tryout ini.');
+    }
+    if (attempt.status !== 'IN_PROGRESS') {
+      throw new BadRequestException('Attempt tidak aktif atau sudah selesai.');
+    }
+
     // 1. Get all answers for this attempt
     const answers = await this.prisma.userAnswer.findMany({
       where: { tryOutAttemptId: attemptId },

@@ -184,6 +184,8 @@ describe('DashboardService', () => {
         totalFinished: 5,
         tokenBalance: 12,
         currentStreak: 4,
+        isPremium: false,
+        premiumExpiresAt: null,
       });
     });
 
@@ -206,6 +208,8 @@ describe('DashboardService', () => {
         totalFinished: 0,
         tokenBalance: 0,
         currentStreak: 0,
+        isPremium: false,
+        premiumExpiresAt: null,
       });
     });
   });
