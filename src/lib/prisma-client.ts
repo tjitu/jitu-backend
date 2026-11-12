@@ -19,6 +19,12 @@ export const getPrismaClient = (): PrismaClient => {
     if (!databaseUrl.searchParams.has('sslmode')) {
       databaseUrl.searchParams.set('sslmode', 'require');
     }
+    if (
+      databaseUrl.searchParams.get('sslmode') === 'require' &&
+      !databaseUrl.searchParams.has('uselibpqcompat')
+    ) {
+      databaseUrl.searchParams.set('uselibpqcompat', 'true');
+    }
 
     const adapter = new PrismaPg({
       connectionString: databaseUrl.toString(),
