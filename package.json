@@ -106,6 +106,9 @@
     "testEnvironment": "node"
   },
   "pnpm": {
+    "overrides": {
+      "jwks-rsa>jose": "4.15.9"
+    },
     "onlyBuiltDependencies": [
       "@prisma/engines",
       "prisma",
