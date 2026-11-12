@@ -63,6 +63,7 @@ export class TryoutService {
       endDate: tryout.scheduledEnd?.toISOString() ?? '',
       isRegistered: (tryout.attempts?.length ?? 0) > 0,
       isFree: tryout.solutionPrice === 0,
+      isSpecial: Boolean(tryout.isSpecial),
       tokenCost: tryout.solutionPrice,
       unlockedSolutions: tryout.unlockedSolutions ?? [], // FIX: Mapping data unlock
       categories: (tryout.subtests ?? [])
@@ -253,8 +254,10 @@ export class TryoutService {
         canEdit: false,
         participants: t._count.attempts,
         badge: t.batch,
+        description: t.description ?? null,
         solutionPrice: t.solutionPrice,
         isPublic: t.isPublic,
+        isSpecial: Boolean(t.isSpecial),
         isRegistered: isRegistered,
         curationStatus,
         isSandboxPreview: curationStatus !== 'PUBLISHED',

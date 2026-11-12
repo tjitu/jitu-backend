@@ -36,6 +36,10 @@ export class CreateTryoutDto {
   @IsOptional()
   isPublic?: boolean;
 
+  @IsBoolean()
+  @IsOptional()
+  isSpecial?: boolean;
+
   @IsString()
   @IsOptional()
   referralCode?: string;

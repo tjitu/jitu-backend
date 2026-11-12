@@ -84,36 +84,48 @@ export class DashboardService {
     const now = new Date();
     const oneWeekAgo = new Date(now.setDate(now.getDate() - 7));
 
-    const [user, lastAttempt, bestScore, weeklyActivity, totalFinished] =
-      await Promise.all([
-        this.prisma.user.findUnique({
-          where: { id: userId },
-          select: {
-            tokenBalance: true,
-            currentStreak: true,
-            isPremium: true,
-            premiumExpiresAt: true,
-          },
-        }),
-        this.prisma.tryOutAttempt.findFirst({
-          where: { userId, status: TryoutStatus.FINISHED },
-          orderBy: { finishedAt: 'desc' },
-          select: { totalScore: true },
-        }),
-        this.prisma.tryOutAttempt.aggregate({
-          where: { userId, status: TryoutStatus.FINISHED },
-          _max: { totalScore: true },
-        }),
-        this.prisma.tryOutAttempt.count({
-          where: {
-            userId,
-            startedAt: { gte: oneWeekAgo },
-          },
-        }),
-        this.prisma.tryOutAttempt.count({
-          where: { userId, status: TryoutStatus.FINISHED },
-        }),
-      ]);
+    const [
+      user,
+      lastAttempt,
+      bestScore,
+      weeklyActivity,
+      totalFinished,
+      activity,
+    ] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          tokenBalance: true,
+          currentStreak: true,
+          isPremium: true,
+          premiumExpiresAt: true,
+        },
+      }),
+      this.prisma.tryOutAttempt.findFirst({
+        where: { userId, status: TryoutStatus.FINISHED },
+        orderBy: { finishedAt: 'desc' },
+        select: { totalScore: true },
+      }),
+      this.prisma.tryOutAttempt.aggregate({
+        where: { userId, status: TryoutStatus.FINISHED },
+        _max: { totalScore: true },
+      }),
+      this.prisma.tryOutAttempt.count({
+        where: {
+          userId,
+          startedAt: { gte: oneWeekAgo },
+        },
+      }),
+      this.prisma.tryOutAttempt.count({
+        where: { userId, status: TryoutStatus.FINISHED },
+      }),
+      this.getLearningActivityStats(userId),
+    ]);
+
+    const currentStreak = activity
+      ? activity.streak
+      : user?.currentStreak || 0;
+    const solvedQuestions = activity ? activity.solvedQuestions : 0;
 
     return {
       lastScore: lastAttempt?.totalScore
@@ -125,13 +137,145 @@ export class DashboardService {
       weeklyActivity: weeklyActivity,
       totalFinished: totalFinished,
       tokenBalance: user?.tokenBalance || 0,
-      currentStreak: user?.currentStreak || 0,
+      currentStreak,
+      solvedQuestions,
       isPremium: Boolean(
         user?.isPremium &&
           (!user?.premiumExpiresAt || user.premiumExpiresAt > new Date()),
       ),
       premiumExpiresAt: user?.premiumExpiresAt || null,
     };
+  }
+
+  private toJakartaDateKey(date: Date): string {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Jakarta',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(date);
+  }
+
+  private computeStreakFromDates(
+    activeDays: Set<string>,
+    now: Date = new Date(),
+  ): number {
+    if (activeDays.size === 0) return 0;
+
+    const todayKey = this.toJakartaDateKey(now);
+    const [year, month, day] = todayKey.split('-').map(Number);
+    const cursor = new Date(Date.UTC(year, month - 1, day));
+
+    const formatCursor = (d: Date) => d.toISOString().slice(0, 10);
+
+    if (!activeDays.has(formatCursor(cursor))) {
+      cursor.setUTCDate(cursor.getUTCDate() - 1);
+      if (!activeDays.has(formatCursor(cursor))) {
+        return 0;
+      }
+    }
+
+    let streak = 0;
+    while (activeDays.has(formatCursor(cursor))) {
+      streak += 1;
+      cursor.setUTCDate(cursor.getUTCDate() - 1);
+    }
+    return streak;
+  }
+
+  private async getLearningActivityStats(
+    userId: string,
+  ): Promise<{ streak: number; solvedQuestions: number } | null> {
+    const queryRaw = (this.prisma as unknown as { $queryRaw?: unknown })
+      ?.$queryRaw;
+    if (typeof queryRaw !== 'function') {
+      return null;
+    }
+
+    try {
+      const practiceTableRows = await this.prisma.$queryRaw<
+        Array<{ exists: boolean }>
+      >`SELECT to_regclass('public."PracticeAttempt"') IS NOT NULL AS "exists"`;
+      const hasPracticeTable = Boolean(practiceTableRows?.[0]?.exists);
+
+      const countRows = hasPracticeTable
+        ? await this.prisma.$queryRaw<Array<{ total: number | bigint }>>`
+            SELECT (
+              (SELECT COUNT(*)::int
+               FROM "UserAnswer" ua
+               INNER JOIN "TryOutAttempt" att ON att.id = ua.tryout_attempt_id
+               WHERE att."userId" = ${userId})
+              +
+              (SELECT COUNT(*)::int
+               FROM "DailyQuestionLog" dql
+               WHERE dql."userId" = ${userId})
+              +
+              (SELECT COUNT(*)::int
+               FROM "PracticeAttempt" pa
+               WHERE pa."user_id" = ${userId} AND pa."status" = 'ANSWERED')
+            )::int AS "total"
+          `
+        : await this.prisma.$queryRaw<Array<{ total: number | bigint }>>`
+            SELECT (
+              (SELECT COUNT(*)::int
+               FROM "UserAnswer" ua
+               INNER JOIN "TryOutAttempt" att ON att.id = ua.tryout_attempt_id
+               WHERE att."userId" = ${userId})
+              +
+              (SELECT COUNT(*)::int
+               FROM "DailyQuestionLog" dql
+               WHERE dql."userId" = ${userId})
+            )::int AS "total"
+          `;
+
+      const dateRows = hasPracticeTable
+        ? await this.prisma.$queryRaw<Array<{ day: string }>>`
+            SELECT DISTINCT day FROM (
+              SELECT TO_CHAR(((ua."createdAt" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Jakarta')::date, 'YYYY-MM-DD') AS day
+              FROM "UserAnswer" ua
+              INNER JOIN "TryOutAttempt" att ON att.id = ua.tryout_attempt_id
+              WHERE att."userId" = ${userId}
+              UNION
+              SELECT TO_CHAR(((dql."completedAt" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Jakarta')::date, 'YYYY-MM-DD') AS day
+              FROM "DailyQuestionLog" dql
+              WHERE dql."userId" = ${userId}
+              UNION
+              SELECT TO_CHAR((
+                CASE
+                  WHEN pg_typeof(COALESCE(pa."answered_at", pa."updated_at")) = 'timestamp with time zone'::regtype
+                    THEN COALESCE(pa."answered_at", pa."updated_at") AT TIME ZONE 'Asia/Jakarta'
+                  ELSE (COALESCE(pa."answered_at", pa."updated_at") AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Jakarta'
+                END
+              )::date, 'YYYY-MM-DD') AS day
+              FROM "PracticeAttempt" pa
+              WHERE pa."user_id" = ${userId} AND pa."status" = 'ANSWERED'
+            ) active_days
+            WHERE day IS NOT NULL
+          `
+        : await this.prisma.$queryRaw<Array<{ day: string }>>`
+            SELECT DISTINCT day FROM (
+              SELECT TO_CHAR(((ua."createdAt" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Jakarta')::date, 'YYYY-MM-DD') AS day
+              FROM "UserAnswer" ua
+              INNER JOIN "TryOutAttempt" att ON att.id = ua.tryout_attempt_id
+              WHERE att."userId" = ${userId}
+              UNION
+              SELECT TO_CHAR(((dql."completedAt" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Jakarta')::date, 'YYYY-MM-DD') AS day
+              FROM "DailyQuestionLog" dql
+              WHERE dql."userId" = ${userId}
+            ) active_days
+            WHERE day IS NOT NULL
+          `;
+
+      const activeDays = new Set(
+        (dateRows || []).map((row) => row.day).filter(Boolean),
+      );
+      return {
+        streak: this.computeStreakFromDates(activeDays),
+        solvedQuestions: Number(countRows?.[0]?.total ?? 0),
+      };
+    } catch {
+      return null;
+    }
   }
 
   async getDailyQuestion(userId: string): Promise<DailyQuestionResponseDto> {
@@ -386,7 +530,9 @@ export class DashboardService {
         description: t.description,
         solutionPrice: t.solutionPrice,
         isPublic: t.isPublic,
+        isSpecial: t.isSpecial,
         scheduledStart: t.scheduledStart,
+        scheduledEnd: t.scheduledEnd,
         createdAt: t.createdAt,
         participants: t._count.attempts,
         isRegistered: t.attempts.length > 0,
@@ -423,7 +569,9 @@ export class DashboardService {
       description: t.description,
       solutionPrice: t.solutionPrice,
       isPublic: t.isPublic,
+      isSpecial: t.isSpecial,
       scheduledStart: t.scheduledStart,
+      scheduledEnd: t.scheduledEnd,
       createdAt: t.createdAt,
       participants: t._count.attempts,
       isRegistered: t.attempts.length > 0,

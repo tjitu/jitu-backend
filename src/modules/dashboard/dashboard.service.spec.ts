@@ -184,9 +184,67 @@ describe('DashboardService', () => {
         totalFinished: 5,
         tokenBalance: 12,
         currentStreak: 4,
+        solvedQuestions: 0,
         isPremium: false,
         premiumExpiresAt: null,
       });
+    });
+
+    it('should compute streak and solvedQuestions from raw activity queries when available', async () => {
+      const userId = 'user-streak';
+      const jakartaFormatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Jakarta',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      });
+      const todayKey = jakartaFormatter.format(new Date());
+      const [y, m, d] = todayKey.split('-').map(Number);
+      const yest = new Date(Date.UTC(y, m - 1, d));
+      yest.setUTCDate(yest.getUTCDate() - 1);
+      const twoDaysAgo = new Date(Date.UTC(y, m - 1, d));
+      twoDaysAgo.setUTCDate(twoDaysAgo.getUTCDate() - 2);
+
+      prismaMock.tryOutAttempt.findFirst.mockResolvedValue({ totalScore: 710 });
+      prismaMock.tryOutAttempt.aggregate.mockResolvedValue({
+        _max: { totalScore: 780 },
+      });
+      prismaMock.tryOutAttempt.count
+        .mockResolvedValueOnce(1)
+        .mockResolvedValueOnce(2);
+      prismaMock.user.findUnique.mockResolvedValue({
+        tokenBalance: 5,
+        currentStreak: 0,
+      });
+
+      const queryRawMock = jest
+        .fn()
+        .mockResolvedValueOnce([{ exists: true }])
+        .mockResolvedValueOnce([{ total: 27 }])
+        .mockResolvedValueOnce([
+          { day: todayKey },
+          { day: yest.toISOString().slice(0, 10) },
+          { day: twoDaysAgo.toISOString().slice(0, 10) },
+        ]);
+      (prismaMock as Record<string, unknown>).$queryRaw = queryRawMock;
+
+      try {
+        const result = await service.getUserStats(userId);
+
+        expect(result).toEqual({
+          lastScore: 710,
+          personalBest: 780,
+          weeklyActivity: 1,
+          totalFinished: 2,
+          tokenBalance: 5,
+          currentStreak: 3,
+          solvedQuestions: 27,
+          isPremium: false,
+          premiumExpiresAt: null,
+        });
+      } finally {
+        delete (prismaMock as Record<string, unknown>).$queryRaw;
+      }
     });
 
     it('should return zero stats for new user', async () => {
@@ -208,6 +266,7 @@ describe('DashboardService', () => {
         totalFinished: 0,
         tokenBalance: 0,
         currentStreak: 0,
+        solvedQuestions: 0,
         isPremium: false,
         premiumExpiresAt: null,
       });

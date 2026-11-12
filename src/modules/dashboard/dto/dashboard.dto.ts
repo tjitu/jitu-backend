@@ -55,6 +55,7 @@ export class UserStatsDto {
   totalFinished: number;
   tokenBalance: number;
   currentStreak: number;
+  solvedQuestions: number;
   isPremium?: boolean;
   premiumExpiresAt?: Date | null;
 }
@@ -101,7 +102,9 @@ export class OngoingTryoutDto {
   description: string | null;
   solutionPrice: number;
   isPublic: boolean;
+  isSpecial?: boolean;
   scheduledStart: Date | null;
+  scheduledEnd: Date | null;
   createdAt: Date;
   participants: number;
   isRegistered: boolean;

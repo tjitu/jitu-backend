@@ -133,6 +133,7 @@ model TryOut {
   solutionPrice Int          @default(0)
   code          Int          @default(autoincrement())
   isPublic      Boolean      @default(true)
+  isSpecial     Boolean      @default(false)
   referralCode  String?      @unique 
   scheduledStart DateTime?
   scheduledEnd   DateTime?

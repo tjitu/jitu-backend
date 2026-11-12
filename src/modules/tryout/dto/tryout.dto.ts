@@ -5,8 +5,10 @@ export class TryOutCardDto {
   canEdit: boolean;
   participants: number;
   badge: string;
+  description?: string | null;
   solutionPrice?: number;
   isPublic?: boolean;
+  isSpecial?: boolean;
   isRegistered?: boolean;
   curationStatus?: string;
   isSandboxPreview?: boolean;
@@ -34,6 +36,7 @@ export class TryoutDetailDto {
   endDate: string;
   isRegistered: boolean;
   isFree: boolean;
+  isSpecial?: boolean;
   tokenCost?: number;
   latestFinishedAttemptId?: string | null;
   latestAttemptStatus?: 'IN_PROGRESS' | 'FINISHED' | 'NOT_STARTED' | null;
