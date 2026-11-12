@@ -10,8 +10,18 @@ let prismaClientInstance: PrismaClient | null = null;
 
 export const getPrismaClient = (): PrismaClient => {
   if (!prismaClientInstance) {
+    const configuredUrl = process.env.DATABASE_URL?.trim().replace(/^(["'])(.*)\1$/, '$2');
+    if (!configuredUrl) {
+      throw new Error('DATABASE_URL must be configured');
+    }
+
+    const databaseUrl = new URL(configuredUrl);
+    if (!databaseUrl.searchParams.has('sslmode')) {
+      databaseUrl.searchParams.set('sslmode', 'require');
+    }
+
     const adapter = new PrismaPg({
-      connectionString: process.env.DATABASE_URL as string,
+      connectionString: databaseUrl.toString(),
     });
     prismaClientInstance = new PrismaClient({ adapter });
   }
