@@ -28,7 +28,9 @@ export class AuthGuard implements CanActivate {
     let decoded: DecodedIdToken;
     try {
       decoded = await getFirebaseAdminAuth().verifyIdToken(match[1]);
-    } catch {
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn('[AuthGuard] verifyIdToken failed:', reason);
       throw new UnauthorizedException('Firebase ID token is invalid or expired.');
     }
 

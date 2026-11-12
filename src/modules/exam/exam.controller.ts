@@ -1,15 +1,19 @@
 import {
   Controller,
   Get,
+  Headers,
   Post,
   Body,
   Param,
+  Query,
   Sse,
   UseGuards,
 } from '@nestjs/common';
 import { ExamService } from './exam.service';
 import { Observable } from 'rxjs';
 import { AuthGuard } from '../../guards/auth.guard';
+import { Session } from '../../decorators/session.decorator';
+import type { UserSession } from '../../decorators/session.decorator';
 import { MessageEvent } from './interfaces';
 
 @Controller('exam')
@@ -20,9 +24,29 @@ export class ExamController {
   @Post(':tryoutId/start')
   async startExam(
     @Param('tryoutId') tryoutId: string,
-    @Body('userId') userId: string,
+    @Session() session: UserSession,
+    @Body('userId') bodyUserId?: string,
+    @Query('sandboxToken') sandboxTokenQuery?: string,
+    @Headers('x-sandbox-token') sandboxTokenHeader?: string,
   ) {
-    return this.examService.startExam(tryoutId, userId);
+    return this.examService.startExam(
+      tryoutId,
+      session.user.id || bodyUserId || '',
+      sandboxTokenQuery || sandboxTokenHeader,
+    );
+  }
+
+  @Get(':attemptId/timer/:order')
+  async getTimerState(
+    @Param('attemptId') attemptId: string,
+    @Param('order') order: string,
+    @Session() session: UserSession,
+  ) {
+    return this.examService.getTimerSnapshot(
+      attemptId,
+      Number(order),
+      session.user.id,
+    );
   }
 
   @Post(':attemptId/start-subtest')

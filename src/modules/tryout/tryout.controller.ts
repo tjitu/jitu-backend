@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Headers,
   Param,
   Query,
   UseGuards,
@@ -24,8 +25,13 @@ export class TryoutController {
   @UseGuards(OptionalAuthGuard)
   async getAllTryouts(
     @Session() session?: UserSession,
+    @Query('sandboxToken') sandboxTokenQuery?: string,
+    @Headers('x-sandbox-token') sandboxTokenHeader?: string,
   ): Promise<TryOutCardDto[]> {
-    return this.tryoutService.getTryouts(session?.user?.id);
+    return this.tryoutService.getTryouts(
+      session?.user?.id,
+      sandboxTokenQuery || sandboxTokenHeader,
+    );
   }
 
   @Get(':id')
@@ -33,8 +39,14 @@ export class TryoutController {
   async getTryoutById(
     @Param('id') id: string,
     @Session() session: UserSession,
+    @Query('sandboxToken') sandboxTokenQuery?: string,
+    @Headers('x-sandbox-token') sandboxTokenHeader?: string,
   ): Promise<TryoutDetailDto> {
-    return this.tryoutService.getTryoutById(id, session.user.id);
+    return this.tryoutService.getTryoutById(
+      id,
+      session.user.id,
+      sandboxTokenQuery || sandboxTokenHeader,
+    );
   }
 
   @Get(':id/leaderboard')
@@ -53,12 +65,15 @@ export class TryoutController {
     @Param('subtestId') subtestId: string,
     @Session() session: UserSession,
     @Query('attemptId') attemptId?: string,
+    @Query('sandboxToken') sandboxTokenQuery?: string,
+    @Headers('x-sandbox-token') sandboxTokenHeader?: string,
   ) {
     return this.tryoutService.getSubtestQuestions(
       id,
       subtestId,
       session.user.id,
       attemptId,
+      sandboxTokenQuery || sandboxTokenHeader,
     );
   }
 
@@ -76,7 +91,13 @@ export class TryoutController {
   async registerTryout(
     @Param('id') id: string,
     @Session() session: UserSession,
+    @Query('sandboxToken') sandboxTokenQuery?: string,
+    @Headers('x-sandbox-token') sandboxTokenHeader?: string,
   ) {
-    return this.tryoutService.registerTryout(session.user.id, id);
+    return this.tryoutService.registerTryout(
+      session.user.id,
+      id,
+      sandboxTokenQuery || sandboxTokenHeader,
+    );
   }
 }

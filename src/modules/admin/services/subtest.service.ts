@@ -24,8 +24,8 @@ export class AdminSubtestService {
       { name: SubtestName.PBM, duration: 25, order: 3 },
       { name: SubtestName.PK, duration: 20, order: 4 },
       { name: SubtestName.LBI, duration: 43, order: 5 },
-      { name: SubtestName.LBE, duration: 30, order: 6 },
-      { name: SubtestName.PM, duration: 30, order: 7 },
+      { name: SubtestName.LBE, duration: 20, order: 6 },
+      { name: SubtestName.PM, duration: 42, order: 7 },
     ];
 
     const data = utbkSubtests.map((s) => ({

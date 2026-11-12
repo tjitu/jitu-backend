@@ -8,6 +8,10 @@ export class TryOutCardDto {
   solutionPrice?: number;
   isPublic?: boolean;
   isRegistered?: boolean;
+  curationStatus?: string;
+  isSandboxPreview?: boolean;
+  scheduledStart?: string | null;
+  scheduledEnd?: string | null;
 }
 
 export class SubjectDto {
@@ -46,6 +50,8 @@ export class TryoutDetailDto {
   benefits: string[];
   requirements: string[];
   unlockedSolutions: any[];
+  curationStatus?: string;
+  isSandboxPreview?: boolean;
 }
 
 export class QuestionDto {

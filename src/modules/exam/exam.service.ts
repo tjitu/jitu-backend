@@ -1,6 +1,7 @@
 import {
   Injectable,
   BadRequestException,
+  ForbiddenException,
   InternalServerErrorException,
   Logger,
 } from '@nestjs/common';
@@ -8,6 +9,7 @@ import { PrismaService } from '../../prisma.service'; // Sesuaikan path ini jika
 import { Observable, of, from } from 'rxjs';
 import { switchMap } from 'rxjs/operators';
 import { MessageEvent } from './interfaces';
+import { resolveTryoutAccess } from '../tryout/tryout-curation.helper';
 
 @Injectable()
 export class ExamService {
@@ -15,7 +17,9 @@ export class ExamService {
 
   constructor(private prisma: PrismaService) {}
 
-  async startExam(tryOutId: string, userId: string) {
+  async startExam(tryOutId: string, userId: string, sandboxToken?: string) {
+    await resolveTryoutAccess(this.prisma, tryOutId, userId, sandboxToken);
+
     // 1. Find ANY existing attempt for this user and tryout.
     const existingAttempt = await this.prisma.tryOutAttempt.findFirst({
       where: { userId, tryOutId },
@@ -35,15 +39,23 @@ export class ExamService {
       return existingAttempt;
     }
 
-    // If it's not started, update it to IN_PROGRESS and return it.
+    // If it's not started, update it to IN_PROGRESS and start at the first populated subtest (default 1).
     if (existingAttempt.status === 'NOT_STARTED') {
+      const tryoutSubtests = await this.prisma.subtest.findMany({
+        where: { tryOutId },
+        orderBy: { order: 'asc' },
+        include: { _count: { select: { questions: true } } },
+      });
+      const firstPopulatedOrder =
+        tryoutSubtests.find((s) => s._count.questions > 0)?.order ?? 1;
+
       return this.prisma.tryOutAttempt.update({
         where: { id: existingAttempt.id },
         data: {
           status: 'IN_PROGRESS',
           startedAt: new Date(),
           subtestStartedAt: new Date(),
-          currentSubtestOrder: 1, // Ensure it starts from the beginning
+          currentSubtestOrder: firstPopulatedOrder,
         },
       });
     }
@@ -86,6 +98,64 @@ export class ExamService {
     });
   }
 
+  /** Computes current subtest endTime/remainingSeconds for both authenticated GET and SSE clients. */
+  private computeTimerPayload(attempt: any, order: number) {
+    if (!attempt || attempt.status !== 'IN_PROGRESS') {
+      return { status: 'FINISHED', remainingSeconds: 0 };
+    }
+
+    const activeOrder = order || attempt.currentSubtestOrder;
+    const currentSubtest = attempt.tryOut.subtests.find(
+      (s: any) => s.order === activeOrder,
+    );
+
+    if (!currentSubtest) {
+      return { status: 'ERROR', remainingSeconds: 0 };
+    }
+
+    const startTime = attempt.subtestStartedAt
+      ? attempt.subtestStartedAt.getTime()
+      : attempt.startedAt.getTime();
+
+    const durationMs = currentSubtest.durationMinutes * 60000;
+    const endTime = new Date(startTime + durationMs);
+    const serverTime = new Date();
+    const remainingSeconds = Math.max(
+      0,
+      Math.floor((endTime.getTime() - serverTime.getTime()) / 1000),
+    );
+
+    return {
+      type: 'init',
+      status: remainingSeconds > 0 ? 'IN_PROGRESS' : 'SUBTEST_FINISHED',
+      endTime: endTime.toISOString(),
+      serverTime: serverTime.toISOString(),
+      remainingSeconds,
+      durationMinutes: currentSubtest.durationMinutes,
+      subtestOrder: activeOrder,
+    };
+  }
+
+  async getTimerSnapshot(attemptId: string, order: number, userId: string) {
+    const attempt = await this.prisma.tryOutAttempt.findUnique({
+      where: { id: attemptId },
+      include: {
+        tryOut: {
+          include: {
+            subtests: { orderBy: { order: 'asc' } },
+          },
+        },
+      },
+    });
+    if (!attempt) {
+      throw new BadRequestException('Attempt tidak ditemukan');
+    }
+    if (attempt.userId !== userId) {
+      throw new ForbiddenException('Kamu tidak memiliki akses ke timer ini.');
+    }
+    return this.computeTimerPayload(attempt, order);
+  }
+
   /**
    * SSE endpoint for exam timer.
    * Instead of creating per-user interval timers (which causes event loop starvation),
@@ -104,52 +174,9 @@ export class ExamService {
         },
       }),
     ).pipe(
-      switchMap((attempt) => {
-        if (!attempt || attempt.status !== 'IN_PROGRESS') {
-          return of({
-            data: { status: 'FINISHED', remainingSeconds: 0 },
-          } as MessageEvent);
-        }
-
-        // Cari subtes yang sedang aktif berdasarkan order yang diminta
-        const activeOrder = order || attempt.currentSubtestOrder;
-        const currentSubtest = attempt.tryOut.subtests.find(
-          (s) => s.order === activeOrder,
-        );
-
-        if (!currentSubtest) {
-          return of({
-            data: { status: 'ERROR', remainingSeconds: 0 },
-          } as MessageEvent);
-        }
-
-        // Calculate end time for the current subtest
-        const startTime = attempt.subtestStartedAt
-          ? attempt.subtestStartedAt.getTime()
-          : attempt.startedAt.getTime();
-
-        const durationMs = currentSubtest.durationMinutes * 60000;
-        const endTime = new Date(startTime + durationMs);
-        const serverTime = new Date();
-        const remainingSeconds = Math.max(
-          0,
-          Math.floor((endTime.getTime() - serverTime.getTime()) / 1000),
-        );
-
-        // Send initial state with endTime - client handles countdown
-        // This eliminates per-user interval timers that cause event loop starvation
-        return of({
-          data: {
-            type: 'init',
-            status: remainingSeconds > 0 ? 'IN_PROGRESS' : 'SUBTEST_FINISHED',
-            endTime: endTime.toISOString(),
-            serverTime: serverTime.toISOString(),
-            remainingSeconds,
-            durationMinutes: currentSubtest.durationMinutes,
-            subtestOrder: activeOrder,
-          },
-        } as MessageEvent);
-      }),
+      switchMap((attempt) =>
+        of({ data: this.computeTimerPayload(attempt, order) } as MessageEvent),
+      ),
     );
   }
 

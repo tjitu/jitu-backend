@@ -15,6 +15,12 @@ import {
 } from './dto/tryout.dto';
 import { SubtestName } from '../../../generated/prisma/client';
 import { ExamService } from '../exam/exam.service';
+import {
+  canAccessTryoutSandbox,
+  getSandboxUserIdSet,
+  getTryoutCurationMap,
+  resolveTryoutAccess,
+} from './tryout-curation.helper';
 
 @Injectable()
 export class TryoutService {
@@ -82,20 +88,29 @@ export class TryoutService {
     };
   }
 
-  async registerTryout(userId: string, tryoutId: string) {
+  async registerTryout(userId: string, tryoutId: string, sandboxToken?: string) {
     // 1. Cek Tryout
     const tryout = await this.prisma.tryOut.findUnique({
       where: { id: tryoutId },
     });
     if (!tryout) throw new NotFoundException('Tryout tidak ditemukan');
 
-    // Cek Status Waktu (Pindahkan ke paling atas agar user lama pun terkena validasi)
-    const now = new Date();
-    if (tryout.scheduledStart && now < tryout.scheduledStart) {
-      throw new BadRequestException('Tryout belum dimulai.');
-    }
-    if (tryout.scheduledEnd && now > tryout.scheduledEnd) {
-      throw new BadRequestException('Masa pengerjaan tryout sudah berakhir.');
+    const { curationStatus } = await resolveTryoutAccess(
+      this.prisma,
+      tryoutId,
+      userId,
+      sandboxToken,
+    );
+
+    // Cek Status Waktu (Sandbox testers can test unpublished tryouts regardless of future schedule dates)
+    if (curationStatus === 'PUBLISHED') {
+      const now = new Date();
+      if (tryout.scheduledStart && now < tryout.scheduledStart) {
+        throw new BadRequestException('Tryout belum dimulai.');
+      }
+      if (tryout.scheduledEnd && now > tryout.scheduledEnd) {
+        throw new BadRequestException('Masa pengerjaan tryout sudah berakhir.');
+      }
     }
 
     // 2. Cek apakah user sudah terdaftar (punya attempt apa saja)
@@ -191,9 +206,19 @@ export class TryoutService {
     });
   }
 
-  async getTryouts(userId?: string): Promise<TryOutCardDto[]> {
+  async getTryouts(
+    userId?: string,
+    sandboxToken?: string,
+  ): Promise<TryOutCardDto[]> {
+    const canSandbox = await canAccessTryoutSandbox(
+      this.prisma,
+      userId,
+      undefined,
+      sandboxToken,
+    );
+
     const tryouts = await this.prisma.tryOut.findMany({
-      where: { isPublic: true },
+      where: canSandbox ? undefined : { isPublic: true },
       include: {
         _count: { select: { attempts: true } },
         // Include attempts only if a user is logged in
@@ -202,7 +227,20 @@ export class TryoutService {
       orderBy: { scheduledStart: 'desc' },
     });
 
-    const result = tryouts.map((t) => {
+    const curationMap = await getTryoutCurationMap(
+      this.prisma,
+      tryouts.map((t) => t.id),
+    );
+
+    const visibleTryouts = tryouts.filter((t) => {
+      const status = curationMap.get(t.id) ?? 'PUBLISHED';
+      if (status === 'PUBLISHED' && t.isPublic) return true;
+      if (canSandbox && status !== 'PUBLISHED') return true;
+      return false;
+    });
+
+    const result = visibleTryouts.map((t) => {
+      const curationStatus = curationMap.get(t.id) ?? 'PUBLISHED';
       const isRegistered = t.attempts ? t.attempts.length > 0 : false;
       return {
         id: t.id,
@@ -214,13 +252,21 @@ export class TryoutService {
         solutionPrice: t.solutionPrice,
         isPublic: t.isPublic,
         isRegistered: isRegistered,
+        curationStatus,
+        isSandboxPreview: curationStatus !== 'PUBLISHED',
+        scheduledStart: t.scheduledStart?.toISOString() ?? null,
+        scheduledEnd: t.scheduledEnd?.toISOString() ?? null,
       };
     });
 
     return result;
   }
 
-  async getTryoutById(id: string, userId?: string): Promise<TryoutDetailDto> {
+  async getTryoutById(
+    id: string,
+    userId?: string,
+    sandboxToken?: string,
+  ): Promise<TryoutDetailDto> {
     const tryout = await this.prisma.tryOut.findUnique({
       where: { id },
       include: {
@@ -247,6 +293,13 @@ export class TryoutService {
     });
 
     if (!tryout) throw new NotFoundException('Tryout not found');
+
+    const { curationStatus } = await resolveTryoutAccess(
+      this.prisma,
+      id,
+      userId,
+      sandboxToken,
+    );
 
     let answeredQuestionIds = new Set<string>();
     if (
@@ -323,6 +376,8 @@ export class TryoutService {
       latestAttemptId,
       currentSubtestOrder,
       latestScore,
+      curationStatus,
+      isSandboxPreview: curationStatus !== 'PUBLISHED',
     };
   }
 
@@ -350,15 +405,22 @@ export class TryoutService {
       throw new ForbiddenException('Leaderboard will be available after the tryout ends.');
     }
 
-    // 1. Get ALL finished attempts to determine the user's rank among everyone.
-    const allFinishedAttempts = await this.prisma.tryOutAttempt.findMany({
-      where: {
-        tryOutId: tryoutId,
-        status: 'FINISHED',
-      },
-      orderBy: { totalScore: 'desc' },
-      include: { user: { select: { id: true, name: true } } },
-    });
+    // 1. Get ALL finished attempts to determine the user's rank among everyone (excluding sandbox QA accounts).
+    const [rawFinishedAttempts, sandboxUserIds] = await Promise.all([
+      this.prisma.tryOutAttempt.findMany({
+        where: {
+          tryOutId: tryoutId,
+          status: 'FINISHED',
+        },
+        orderBy: { totalScore: 'desc' },
+        include: { user: { select: { id: true, name: true } } },
+      }),
+      getSandboxUserIdSet(this.prisma),
+    ]);
+
+    const allFinishedAttempts = rawFinishedAttempts.filter(
+      (attempt) => !sandboxUserIds.has(attempt.userId) || attempt.userId === userId,
+    );
 
     // 2. Filter for attempts that are eligible for the official leaderboard.
     const eligibleAttempts = allFinishedAttempts.filter(
@@ -407,7 +469,15 @@ export class TryoutService {
     subtestIdOrOrder: string | number,
     userId: string, // Wajibkan userId demi keamanan
     attemptId?: string,
+    sandboxToken?: string,
   ) {
+    const { curationStatus } = await resolveTryoutAccess(
+      this.prisma,
+      tryOutId,
+      userId,
+      sandboxToken,
+    );
+
     let subtest: any;
     const order = Number(subtestIdOrOrder);
 
@@ -462,17 +532,22 @@ export class TryoutService {
     if (currentAttempt && currentAttempt.status === 'IN_PROGRESS') {
       const now = new Date();
 
-      // 1. Cek Durasi Pengerjaan
+      // 1. Cek Durasi Pengerjaan (+ alokasi jeda 1 menit antar subtes)
       const totalDuration = currentAttempt.tryOut.subtests.reduce(
         (acc, s) => acc + (s.durationMinutes || 0),
         0,
       );
+      const breakAllowanceMs =
+        Math.max(0, (currentAttempt.tryOut.subtests?.length ?? 1) - 1) * 60_000;
       const expiryTime = new Date(
-        currentAttempt.startedAt.getTime() + totalDuration * 60000,
+        currentAttempt.startedAt.getTime() +
+          totalDuration * 60000 +
+          breakAllowanceMs,
       );
 
-      // 2. Cek Jadwal Tryout Berakhir
+      // 2. Cek Jadwal Tryout Berakhir (lewati saat Sandbox preview agar QA leluasa menguji)
       const scheduleEnded =
+        curationStatus === 'PUBLISHED' &&
         currentAttempt.tryOut.scheduledEnd &&
         now > currentAttempt.tryOut.scheduledEnd;
 
@@ -568,12 +643,30 @@ export class TryoutService {
       },
     });
 
+    const timerStartMs = currentAttempt.subtestStartedAt
+      ? new Date(currentAttempt.subtestStartedAt).getTime()
+      : new Date(currentAttempt.startedAt).getTime();
+    const timerEndDate = new Date(
+      timerStartMs + (subtest.durationMinutes || 0) * 60_000,
+    );
+    const serverNow = new Date();
+    const remainingSeconds = !isReviewMode
+      ? Math.max(
+          0,
+          Math.floor((timerEndDate.getTime() - serverNow.getTime()) / 1000),
+        )
+      : 0;
+
     return {
       subtestId: subtest.order,
       subtestName: subtest.name,
       tryOutId,
       tryoutTitle: tryoutInfo?.title || 'Tryout',
       durationMinutes: subtest.durationMinutes,
+      curationStatus,
+      endTime: !isReviewMode ? timerEndDate.toISOString() : null,
+      serverTime: !isReviewMode ? serverNow.toISOString() : null,
+      remainingSeconds: !isReviewMode ? remainingSeconds : null,
       allSubtests: tryoutInfo?.subtests.map((s) => ({
         id: s.id,
         name: s.name,
