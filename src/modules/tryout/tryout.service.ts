@@ -37,6 +37,7 @@ export class TryoutService {
   private mapTryoutToDto(
     tryout: any,
     answeredQuestionIds?: Set<string>,
+    userAnswersByQuestionId?: Map<string, boolean>,
   ): TryoutDetailDto {
     const totalQuestions = (tryout.subtests ?? []).reduce(
       (sum: number, s: any) => sum + (s.questions?.length ?? 0),
@@ -75,6 +76,24 @@ export class TryoutService {
             answeredSet.has(id),
           ).length;
 
+          let subtestCorrect: number | undefined = undefined;
+          let subtestWrong: number | undefined = undefined;
+          let subtestEmpty: number | undefined = undefined;
+
+          if (userAnswersByQuestionId) {
+            const correct = qIds.filter(
+              (id: string) => userAnswersByQuestionId.get(id) === true,
+            ).length;
+            const wrong = qIds.filter(
+              (id: string) =>
+                userAnswersByQuestionId.has(id) &&
+                userAnswersByQuestionId.get(id) === false,
+            ).length;
+            subtestCorrect = correct;
+            subtestWrong = wrong;
+            subtestEmpty = Math.max(0, qIds.length - (correct + wrong));
+          }
+
           return {
             id: Number(s.order),
             name: s.name,
@@ -83,6 +102,9 @@ export class TryoutService {
             isCompleted:
               (s.questions?.length ?? 0) > 0 &&
               answeredCount === (s.questions?.length ?? 0),
+            correctCount: subtestCorrect,
+            wrongCount: subtestWrong,
+            emptyCount: subtestEmpty,
           };
         }),
       benefits: ['Pembahasan lengkap', 'Analisis hasil', 'Simulasi UTBK'],
@@ -338,6 +360,7 @@ export class TryoutService {
     let correctCount = 0;
     let wrongCount = 0;
     let emptyCount = 0;
+    let userAnswersMap: Map<string, boolean> | undefined = undefined;
 
     const totalQuestions = (tryout.subtests ?? []).reduce(
       (sum: number, s: any) => sum + (s.questions?.length ?? 0),
@@ -360,7 +383,7 @@ export class TryoutService {
         select: {
           id: true,
           totalScore: true,
-          answers: { select: { isCorrect: true } },
+          answers: { select: { questionId: true, isCorrect: true } },
         },
       });
       latestFinishedAttemptId = latestFinished?.id ?? null;
@@ -369,7 +392,11 @@ export class TryoutService {
         : 0;
 
       if (latestFinished) {
+        userAnswersMap = new Map<string, boolean>();
         const answers = latestFinished.answers ?? [];
+        for (const ans of answers) {
+          userAnswersMap.set(String(ans.questionId), Boolean(ans.isCorrect));
+        }
         correctCount = answers.filter((a) => a.isCorrect).length;
         wrongCount = answers.filter((a) => !a.isCorrect).length;
         emptyCount = Math.max(0, totalQuestions - answers.length);
@@ -387,7 +414,11 @@ export class TryoutService {
         (!user?.premiumExpiresAt || user.premiumExpiresAt > new Date()),
     );
 
-    const dto = this.mapTryoutToDto(tryout, answeredQuestionIds);
+    const dto = this.mapTryoutToDto(
+      tryout,
+      answeredQuestionIds,
+      userAnswersMap,
+    );
     if (isUserPremium) {
       dto.unlockedSolutions = [
         { id: 'premium-pass', userId, tryOutId: id, unlockedAt: new Date() },

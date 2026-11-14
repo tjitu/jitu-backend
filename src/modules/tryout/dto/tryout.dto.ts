@@ -52,6 +52,9 @@ export class TryoutDetailDto {
     questionCount: number;
     duration: number;
     isCompleted: boolean;
+    correctCount?: number;
+    wrongCount?: number;
+    emptyCount?: number;
   }[];
   benefits: string[];
   requirements: string[];
