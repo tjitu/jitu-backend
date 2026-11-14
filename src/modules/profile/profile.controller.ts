@@ -35,7 +35,7 @@ export class ProfileController {
   @Patch()
   async updateProfile(
     @Session() session: UserSession,
-    @Body() body: { name?: string; target?: string },
+    @Body() body: { name?: string; target?: string; image?: string },
   ) {
     const userId = session.user.id;
 

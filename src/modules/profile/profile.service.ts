@@ -120,11 +120,15 @@ export class ProfileService {
 
   async updateProfile(
     userId: string,
-    data: { name?: string; target?: string },
+    data: { name?: string; target?: string; image?: string },
   ) {
     return this.prisma.user.update({
       where: { id: userId },
-      data: { name: data.name, target: data.target },
+      data: {
+        ...(data.name !== undefined && { name: data.name }),
+        ...(data.target !== undefined && { target: data.target }),
+        ...(data.image !== undefined && { image: data.image }),
+      },
     });
   }
 
