@@ -105,11 +105,9 @@ export class TryoutService {
     );
 
     // Cek Status Waktu (Sandbox testers can test unpublished tryouts regardless of future schedule dates)
+    // Siswa dapat mendaftar sebelum dan selama tryout berlangsung; pendaftaran ditutup hanya jika jadwal sudah berakhir
     if (curationStatus === 'PUBLISHED') {
       const now = new Date();
-      if (tryout.scheduledStart && now < tryout.scheduledStart) {
-        throw new BadRequestException('Tryout belum dimulai.');
-      }
       if (tryout.scheduledEnd && now > tryout.scheduledEnd) {
         throw new BadRequestException('Masa pengerjaan tryout sudah berakhir.');
       }

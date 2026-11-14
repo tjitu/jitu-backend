@@ -19,7 +19,28 @@ export class ExamService {
   constructor(private prisma: PrismaService) {}
 
   async startExam(tryOutId: string, userId: string, sandboxToken?: string) {
-    await resolveTryoutAccess(this.prisma, tryOutId, userId, sandboxToken);
+    const { curationStatus, canSandbox } = await resolveTryoutAccess(
+      this.prisma,
+      tryOutId,
+      userId,
+      sandboxToken,
+    );
+
+    if (curationStatus === 'PUBLISHED' && !canSandbox) {
+      const tryout = await this.prisma.tryOut.findUnique({
+        where: { id: tryOutId },
+        select: { scheduledStart: true, scheduledEnd: true },
+      });
+      const now = new Date();
+      if (tryout?.scheduledStart && now < tryout.scheduledStart) {
+        throw new BadRequestException(
+          'Tryout belum dimulai. Ujian baru dapat dikerjakan sesuai jadwal.',
+        );
+      }
+      if (tryout?.scheduledEnd && now > tryout.scheduledEnd) {
+        throw new BadRequestException('Masa pengerjaan tryout sudah berakhir.');
+      }
+    }
 
     // 1. Find ANY existing attempt for this user and tryout.
     const existingAttempt = await this.prisma.tryOutAttempt.findFirst({

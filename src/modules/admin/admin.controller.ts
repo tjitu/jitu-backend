@@ -278,6 +278,23 @@ export class AdminController {
   }
 
   // --- RESULTS / LEADERBOARD ---
+  @Get('tryouts/:id/registrants')
+  getTryoutRegistrants(
+    @Param('id') id: string,
+    @Query('page') page: string = '1',
+    @Query('limit') limit: string = '50',
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.resultService.getRegistrants(
+      id,
+      Number(page),
+      Number(limit),
+      status as any,
+      search,
+    );
+  }
+
   @Get('tryouts/:id/leaderboard')
   getTryoutLeaderboard(
     @Param('id') id: string,
@@ -293,8 +310,11 @@ export class AdminController {
   }
 
   @Get('tryouts/:id/export')
-  exportTryoutResults(@Param('id') id: string) {
-    return this.resultService.exportResults(id);
+  exportTryoutResults(
+    @Param('id') id: string,
+    @Query('type') type: string = 'all',
+  ) {
+    return this.resultService.exportResults(id, type as any);
   }
 
   // --- AI GENERATOR ---

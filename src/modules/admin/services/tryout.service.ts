@@ -29,6 +29,11 @@ export class AdminTryoutService {
           isPublic: true,
           isSpecial: true,
           referralCode: true,
+          _count: {
+            select: {
+              attempts: true,
+            },
+          },
         },
       }),
       this.prisma.tryOut.count(),
@@ -48,9 +53,11 @@ export class AdminTryoutService {
         }
       }
 
+      const { _count, ...rest } = item;
       return {
-        ...item,
+        ...rest,
         status: currentStatus,
+        participantsCount: _count?.attempts ?? 0,
       };
     });
 

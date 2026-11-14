@@ -60,8 +60,8 @@ describe('AdminService', () => {
     it('should return an array of tryouts', async () => {
       // Arrange
       const mockTryouts = [
-        { id: '1', title: 'Tryout 1' },
-        { id: '2', title: 'Tryout 2' },
+        { id: '1', title: 'Tryout 1', status: 'NOT_STARTED', _count: { attempts: 0 } },
+        { id: '2', title: 'Tryout 2', status: 'NOT_STARTED', _count: { attempts: 0 } },
       ];
       mockPrismaService.tryOut.findMany.mockResolvedValue(mockTryouts);
       mockPrismaService.tryOut.count.mockResolvedValue(mockTryouts.length);
@@ -71,7 +71,10 @@ describe('AdminService', () => {
 
       // Assert
       expect(result).toEqual({
-        data: mockTryouts,
+        data: [
+          { id: '1', title: 'Tryout 1', status: 'NOT_STARTED', participantsCount: 0 },
+          { id: '2', title: 'Tryout 2', status: 'NOT_STARTED', participantsCount: 0 },
+        ],
         meta: {
           total: 2,
           page: 1,
