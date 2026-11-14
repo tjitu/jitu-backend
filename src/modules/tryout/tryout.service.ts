@@ -335,6 +335,14 @@ export class TryoutService {
     let latestAttemptId: string | null = null;
     let currentSubtestOrder = 1;
     let latestScore = 0;
+    let correctCount = 0;
+    let wrongCount = 0;
+    let emptyCount = 0;
+
+    const totalQuestions = (tryout.subtests ?? []).reduce(
+      (sum: number, s: any) => sum + (s.questions?.length ?? 0),
+      0,
+    );
 
     if (userId) {
       const latestAttempt = await this.prisma.tryOutAttempt.findFirst({
@@ -349,12 +357,23 @@ export class TryoutService {
       const latestFinished = await this.prisma.tryOutAttempt.findFirst({
         where: { userId, tryOutId: id, status: 'FINISHED' },
         orderBy: { finishedAt: 'desc' },
-        select: { id: true, totalScore: true },
+        select: {
+          id: true,
+          totalScore: true,
+          answers: { select: { isCorrect: true } },
+        },
       });
       latestFinishedAttemptId = latestFinished?.id ?? null;
       latestScore = latestFinished?.totalScore
         ? Math.round(latestFinished.totalScore)
         : 0;
+
+      if (latestFinished) {
+        const answers = latestFinished.answers ?? [];
+        correctCount = answers.filter((a) => a.isCorrect).length;
+        wrongCount = answers.filter((a) => !a.isCorrect).length;
+        emptyCount = Math.max(0, totalQuestions - answers.length);
+      }
     }
 
     const user = userId
@@ -381,6 +400,9 @@ export class TryoutService {
       latestAttemptId,
       currentSubtestOrder,
       latestScore,
+      correctCount,
+      wrongCount,
+      emptyCount,
       curationStatus,
       isSandboxPreview: curationStatus !== 'PUBLISHED',
     };

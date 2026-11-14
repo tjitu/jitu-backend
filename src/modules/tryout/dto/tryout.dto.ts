@@ -43,6 +43,9 @@ export class TryoutDetailDto {
   latestAttemptId?: string | null;
   currentSubtestOrder?: number;
   latestScore?: number;
+  correctCount?: number;
+  wrongCount?: number;
+  emptyCount?: number;
   categories: {
     id: number;
     name: string;
