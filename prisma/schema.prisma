@@ -53,7 +53,7 @@ model User {
   email             String
   emailVerified     Boolean            @default(false)
   image             String?
-  target            String?            @db.VarChar(100)
+  target            String?
   currentStreak     Int                @default(0)
   lastDailyDate     DateTime?
   tokenBalance      Int                @default(0)

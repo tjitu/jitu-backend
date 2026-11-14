@@ -13,6 +13,10 @@ import {
   ActiveTryoutDto,
   OngoingTryoutDto,
 } from './dto/dashboard.dto';
+import {
+  getTryoutCurationMap,
+  canAccessTryoutSandbox,
+} from '../tryout/tryout-curation.helper';
 
 enum TryoutStatus {
   NOT_STARTED = 'NOT_STARTED',
@@ -515,7 +519,22 @@ export class DashboardService {
       orderBy: { scheduledStart: 'desc' },
     });
 
-    return tryouts.map((t) => {
+    const [curationMap, canSandbox] = await Promise.all([
+      getTryoutCurationMap(
+        this.prisma,
+        tryouts.map((t) => t.id),
+      ),
+      canAccessTryoutSandbox(this.prisma, userId),
+    ]);
+
+    const visibleTryouts = tryouts.filter((t) => {
+      const status = curationMap.get(t.id) ?? 'DRAFT';
+      if (status === 'PUBLISHED' && t.isPublic) return true;
+      if (canSandbox) return true;
+      return false;
+    });
+
+    return visibleTryouts.map((t) => {
       const now = new Date();
       let status = t.attempts.length > 0 ? t.attempts[0].status : undefined;
 
@@ -563,7 +582,22 @@ export class DashboardService {
       orderBy: { scheduledStart: 'asc' },
     });
 
-    return tryouts.map((t) => ({
+    const [curationMap, canSandbox] = await Promise.all([
+      getTryoutCurationMap(
+        this.prisma,
+        tryouts.map((t) => t.id),
+      ),
+      canAccessTryoutSandbox(this.prisma, userId),
+    ]);
+
+    const visibleTryouts = tryouts.filter((t) => {
+      const status = curationMap.get(t.id) ?? 'DRAFT';
+      if (status === 'PUBLISHED' && t.isPublic) return true;
+      if (canSandbox) return true;
+      return false;
+    });
+
+    return visibleTryouts.map((t) => ({
       id: t.id,
       title: t.title,
       description: t.description,

@@ -59,3 +59,10 @@ pids
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 /generated/prisma
+
+
+# scratch & temporary test files
+scratch_*.*
+check_*.*
+*.scratch.*
+temp_*.*
