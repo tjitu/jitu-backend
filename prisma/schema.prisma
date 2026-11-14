@@ -54,6 +54,8 @@ model User {
   emailVerified     Boolean            @default(false)
   image             String?
   target            String?
+  phoneNumber       String?
+  school            String?
   currentStreak     Int                @default(0)
   lastDailyDate     DateTime?
   tokenBalance      Int                @default(0)

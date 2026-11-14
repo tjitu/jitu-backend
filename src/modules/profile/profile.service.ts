@@ -93,6 +93,8 @@ export class ProfileService {
         image: user.image,
         tokenBalance: user.tokenBalance,
         target: user.target,
+        phoneNumber: user.phoneNumber || null,
+        school: user.school || null,
         hasPassword,
         isPremium: Boolean(
           user.isPremium &&
@@ -120,11 +122,28 @@ export class ProfileService {
 
   async updateProfile(
     userId: string,
-    data: { name?: string; target?: string },
+    data: {
+      name?: string;
+      target?: string;
+      phoneNumber?: string;
+      school?: string;
+    },
   ) {
+    const updateData: {
+      name?: string;
+      target?: string;
+      phoneNumber?: string;
+      school?: string;
+    } = {};
+
+    if (data.name !== undefined) updateData.name = data.name;
+    if (data.target !== undefined) updateData.target = data.target;
+    if (data.phoneNumber !== undefined) updateData.phoneNumber = data.phoneNumber;
+    if (data.school !== undefined) updateData.school = data.school;
+
     return this.prisma.user.update({
       where: { id: userId },
-      data: { name: data.name, target: data.target },
+      data: updateData,
     });
   }
 
