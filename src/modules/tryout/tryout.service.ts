@@ -440,9 +440,9 @@ export class TryoutService {
     const officialLeaderboard: LeaderboardItemDto[] = eligibleAttempts.map(
       (attempt, index) => ({
         rank: index + 1,
-        name: attempt.user.name,
-        score: Math.round(attempt.totalScore),
-        isCurrentUser: attempt.user.id === userId,
+        name: attempt.user?.name || 'Peserta',
+        score: Math.round(attempt.totalScore || 0),
+        isCurrentUser: attempt.userId === userId,
       }),
     );
 
@@ -456,8 +456,8 @@ export class TryoutService {
       const userAttempt = allFinishedAttempts[userAttemptIndex];
       currentUserRank = {
         rank: userAttemptIndex + 1,
-        name: userAttempt.user.name,
-        score: Math.round(userAttempt.totalScore),
+        name: userAttempt.user?.name || 'Peserta',
+        score: Math.round(userAttempt.totalScore || 0),
         isCurrentUser: true,
       };
     }

@@ -13,11 +13,26 @@ function postgresErrorCode(error: unknown): string | undefined {
   if (!error || typeof error !== 'object') return undefined;
   const value = error as {
     code?: unknown;
-    meta?: { code?: unknown };
+    message?: unknown;
+    meta?: { code?: unknown; driverAdapterError?: { cause?: { code?: unknown } } };
     cause?: { code?: unknown };
   };
-  const code = value.code ?? value.meta?.code ?? value.cause?.code;
-  return typeof code === 'string' ? code : undefined;
+  const candidateCodes = [
+    value.meta?.code,
+    value.meta?.driverAdapterError?.cause?.code,
+    value.cause?.code,
+    value.code,
+  ];
+  for (const candidate of candidateCodes) {
+    if (typeof candidate === 'string' && candidate !== 'P2010') {
+      return candidate;
+    }
+  }
+  const msg = typeof value.message === 'string' ? value.message : '';
+  if (msg.includes('42703') || msg.includes('column') && msg.includes('does not exist')) {
+    return '42703';
+  }
+  return typeof value.code === 'string' ? value.code : undefined;
 }
 
 /** Fetches curation_status for given tryout IDs cleanly even if schema migration ran out-of-band. */
