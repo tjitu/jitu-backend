@@ -247,6 +247,75 @@ describe('DashboardService', () => {
       }
     });
 
+    it('should update streak, best IRT, and solved-question totals across several simulated days', async () => {
+      const userId = 'user-multiday';
+      const firstDay = new Date('2026-11-10T12:00:00.000Z');
+      const dayMs = 24 * 60 * 60 * 1000;
+      const jakartaDateKey = (date: Date) =>
+        new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'Asia/Jakarta',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        }).format(date);
+      const activeDayOffsets = [
+        [0],
+        [0, 1],
+        [0, 1, 2],
+        [0, 1, 2, 3],
+        [0, 1, 2, 3], // No activity today; yesterday's streak is retained.
+        [0, 1, 2, 3, 5], // Skip one day; today's streak restarts at one.
+        [0, 1, 2, 3, 5], // Yesterday was active, so the current streak remains one.
+        [0, 1, 2, 3, 5], // Two inactive days; current streak expires.
+      ];
+      const lastScores = [620, 590, 710, 680, 680, 760, 760, 760];
+      const bestScores = [620, 620, 710, 710, 710, 760, 760, 760];
+      const solvedTotals = [4, 9, 14, 19, 19, 24, 24, 24];
+      const expectedStreaks = [1, 2, 3, 4, 4, 1, 1, 0];
+
+      jest.useFakeTimers();
+
+      try {
+        for (let dayIndex = 0; dayIndex < activeDayOffsets.length; dayIndex++) {
+          const today = new Date(firstDay.getTime() + dayIndex * dayMs);
+          jest.setSystemTime(today);
+          prismaMock.tryOutAttempt.findFirst.mockResolvedValue({
+            totalScore: lastScores[dayIndex],
+          });
+          prismaMock.tryOutAttempt.aggregate.mockResolvedValue({
+            _max: { totalScore: bestScores[dayIndex] },
+          });
+          prismaMock.tryOutAttempt.count
+            .mockResolvedValueOnce(1)
+            .mockResolvedValueOnce(dayIndex + 1);
+          prismaMock.user.findUnique.mockResolvedValue({
+            tokenBalance: 0,
+            currentStreak: 0,
+          });
+
+          const dateRows = activeDayOffsets[dayIndex].map((offset) => ({
+            day: jakartaDateKey(new Date(firstDay.getTime() + offset * dayMs)),
+          }));
+          const queryRawMock = jest
+            .fn()
+            .mockResolvedValueOnce([{ exists: true }])
+            .mockResolvedValueOnce([{ total: solvedTotals[dayIndex] }])
+            .mockResolvedValueOnce(dateRows);
+          (prismaMock as Record<string, unknown>).$queryRaw = queryRawMock;
+
+          const result = await service.getUserStats(userId);
+
+          expect(result.currentStreak).toBe(expectedStreaks[dayIndex]);
+          expect(result.personalBest).toBe(bestScores[dayIndex]);
+          expect(result.lastScore).toBe(lastScores[dayIndex]);
+          expect(result.solvedQuestions).toBe(solvedTotals[dayIndex]);
+        }
+      } finally {
+        delete (prismaMock as Record<string, unknown>).$queryRaw;
+        jest.useRealTimers();
+      }
+    });
+
     it('should return zero stats for new user', async () => {
       const userId = 'user-new';
 
