@@ -19,12 +19,19 @@ export class ExamService {
   constructor(private prisma: PrismaService) {}
 
   async startExam(tryOutId: string, userId: string, sandboxToken?: string) {
-    const { curationStatus, canSandbox } = await resolveTryoutAccess(
-      this.prisma,
-      tryOutId,
-      userId,
-      sandboxToken,
-    );
+    const { curationStatus, questionsReleased, canSandbox } =
+      await resolveTryoutAccess(
+        this.prisma,
+        tryOutId,
+        userId,
+        sandboxToken,
+      );
+
+    if (!canSandbox && !questionsReleased) {
+      throw new BadRequestException(
+        'Soal ujian untuk Tryout ini belum diluncurkan oleh panitia. Silakan tunggu hingga soal dibuka menjelang jadwal pelaksanaan.',
+      );
+    }
 
     if (curationStatus === 'PUBLISHED' && !canSandbox) {
       const tryout = await this.prisma.tryOut.findUnique({

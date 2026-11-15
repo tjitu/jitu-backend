@@ -321,12 +321,13 @@ export class TryoutService {
 
     if (!tryout) throw new NotFoundException('Tryout not found');
 
-    const { curationStatus } = await resolveTryoutAccess(
-      this.prisma,
-      id,
-      userId,
-      sandboxToken,
-    );
+    const { curationStatus, questionsReleased, breakSeconds } =
+      await resolveTryoutAccess(
+        this.prisma,
+        id,
+        userId,
+        sandboxToken,
+      );
 
     let answeredQuestionIds = new Set<string>();
     if (
@@ -435,6 +436,8 @@ export class TryoutService {
       wrongCount,
       emptyCount,
       curationStatus,
+      questionsReleased,
+      breakSeconds,
       isSandboxPreview: curationStatus !== 'PUBLISHED',
     };
   }
@@ -529,12 +532,19 @@ export class TryoutService {
     attemptId?: string,
     sandboxToken?: string,
   ) {
-    const { curationStatus } = await resolveTryoutAccess(
-      this.prisma,
-      tryOutId,
-      userId,
-      sandboxToken,
-    );
+    const { curationStatus, questionsReleased, breakSeconds, canSandbox } =
+      await resolveTryoutAccess(
+        this.prisma,
+        tryOutId,
+        userId,
+        sandboxToken,
+      );
+
+    if (!canSandbox && !questionsReleased) {
+      throw new BadRequestException(
+        'Soal ujian untuk Tryout ini belum diluncurkan oleh panitia. Silakan tunggu hingga jadwal peluncuran soal.',
+      );
+    }
 
     let subtest: any;
     const order = Number(subtestIdOrOrder);
@@ -590,13 +600,14 @@ export class TryoutService {
     if (currentAttempt && currentAttempt.status === 'IN_PROGRESS') {
       const now = new Date();
 
-      // 1. Cek Durasi Pengerjaan (+ alokasi jeda 1 menit antar subtes)
+      // 1. Cek Durasi Pengerjaan (+ alokasi jeda antar subtes sesuai setting tryout)
       const totalDuration = currentAttempt.tryOut.subtests.reduce(
         (acc, s) => acc + (s.durationMinutes || 0),
         0,
       );
       const breakAllowanceMs =
-        Math.max(0, (currentAttempt.tryOut.subtests?.length ?? 1) - 1) * 60_000;
+        Math.max(0, (currentAttempt.tryOut.subtests?.length ?? 1) - 1) *
+        (breakSeconds * 1000);
       const expiryTime = new Date(
         currentAttempt.startedAt.getTime() +
           totalDuration * 60000 +
@@ -721,6 +732,7 @@ export class TryoutService {
       tryOutId,
       tryoutTitle: tryoutInfo?.title || 'Tryout',
       durationMinutes: subtest.durationMinutes,
+      breakSeconds,
       curationStatus,
       endTime: !isReviewMode ? timerEndDate.toISOString() : null,
       serverTime: !isReviewMode ? serverNow.toISOString() : null,

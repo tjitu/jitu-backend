@@ -60,6 +60,8 @@ export class TryoutDetailDto {
   requirements: string[];
   unlockedSolutions: any[];
   curationStatus?: string;
+  questionsReleased?: boolean;
+  breakSeconds?: number;
   isSandboxPreview?: boolean;
 }
 

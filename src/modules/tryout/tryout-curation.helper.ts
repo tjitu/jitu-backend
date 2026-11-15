@@ -145,25 +145,87 @@ export async function getSandboxUserIdSet(
   }
 }
 
+/** Fetches curation_status, questions_released, and break_seconds for a tryout cleanly even if schema migration ran out-of-band. */
+export async function getTryoutGovernanceMeta(
+  prisma: PrismaService,
+  tryoutId: string,
+): Promise<{
+  curationStatus: TryoutCurationStatus;
+  questionsReleased: boolean;
+  breakSeconds: number;
+}> {
+  if (!tryoutId) {
+    return { curationStatus: 'DRAFT', questionsReleased: false, breakSeconds: 60 };
+  }
+
+  try {
+    const rows = await prisma.$queryRaw<
+      Array<{
+        curationStatus: string | null;
+        questionsReleased: boolean | null;
+        breakSeconds: number | null;
+      }>
+    >(
+      Prisma.sql`SELECT
+        COALESCE("curation_status", 'PUBLISHED') AS "curationStatus",
+        COALESCE("questions_released", COALESCE("curation_status", 'PUBLISHED') = 'PUBLISHED') AS "questionsReleased",
+        COALESCE("break_seconds", 60)::int AS "breakSeconds"
+       FROM public."TryOut"
+       WHERE "id" = ${tryoutId}
+       LIMIT 1`,
+    );
+    const row = rows[0];
+    if (!row) {
+      return { curationStatus: 'DRAFT', questionsReleased: false, breakSeconds: 60 };
+    }
+    const normalized = String(row.curationStatus || 'PUBLISHED')
+      .toUpperCase()
+      .trim() as TryoutCurationStatus;
+    return {
+      curationStatus: normalized,
+      questionsReleased: Boolean(row.questionsReleased),
+      breakSeconds: Math.max(0, Math.min(1800, Number(row.breakSeconds ?? 60))),
+    };
+  } catch (error) {
+    if (postgresErrorCode(error) !== '42703') {
+      throw new ServiceUnavailableException(
+        'Status kurasi tryout sedang tidak tersedia.',
+      );
+    }
+    const map = await getTryoutCurationMap(prisma, [tryoutId]);
+    const curationStatus = map.get(tryoutId) ?? 'PUBLISHED';
+    return {
+      curationStatus,
+      questionsReleased: curationStatus === 'PUBLISHED',
+      breakSeconds: 60,
+    };
+  }
+}
+
 /** Verifies whether a user/token is permitted to view or attempt a tryout given its curation state. */
 export async function resolveTryoutAccess(
   prisma: PrismaService,
   tryoutId: string,
   userId?: string | null,
   sandboxToken?: string | null,
-): Promise<{ curationStatus: TryoutCurationStatus; canSandbox: boolean }> {
-  const [curationMap, canSandbox] = await Promise.all([
-    getTryoutCurationMap(prisma, [tryoutId]),
+): Promise<{
+  curationStatus: TryoutCurationStatus;
+  questionsReleased: boolean;
+  breakSeconds: number;
+  canSandbox: boolean;
+}> {
+  const [meta, canSandbox] = await Promise.all([
+    getTryoutGovernanceMeta(prisma, tryoutId),
     canAccessTryoutSandbox(prisma, userId, tryoutId, sandboxToken),
   ]);
-  const curationStatus = curationMap.get(tryoutId) ?? 'DRAFT';
+  const { curationStatus, questionsReleased, breakSeconds } = meta;
 
   if (curationStatus === 'PUBLISHED') {
-    return { curationStatus, canSandbox };
+    return { curationStatus, questionsReleased, breakSeconds, canSandbox };
   }
 
   if (canSandbox) {
-    return { curationStatus, canSandbox };
+    return { curationStatus, questionsReleased, breakSeconds, canSandbox };
   }
 
   throw new NotFoundException(
