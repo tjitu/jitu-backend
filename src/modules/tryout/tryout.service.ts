@@ -38,6 +38,7 @@ export class TryoutService {
     tryout: any,
     answeredQuestionIds?: Set<string>,
     userAnswersByQuestionId?: Map<string, boolean>,
+    subtestScoresBySubtestId?: Map<string, number>,
   ): TryoutDetailDto {
     const totalQuestions = (tryout.subtests ?? []).reduce(
       (sum: number, s: any) => sum + (s.questions?.length ?? 0),
@@ -102,6 +103,7 @@ export class TryoutService {
             isCompleted:
               (s.questions?.length ?? 0) > 0 &&
               answeredCount === (s.questions?.length ?? 0),
+            score: subtestScoresBySubtestId?.get(String(s.id)),
             correctCount: subtestCorrect,
             wrongCount: subtestWrong,
             emptyCount: subtestEmpty,
@@ -368,6 +370,8 @@ export class TryoutService {
       0,
     );
 
+    let subtestScoresMap: Map<string, number> | undefined = undefined;
+
     if (userId) {
       const latestAttempt = await this.prisma.tryOutAttempt.findFirst({
         where: { userId, tryOutId: id },
@@ -401,6 +405,15 @@ export class TryoutService {
         correctCount = answers.filter((a) => a.isCorrect).length;
         wrongCount = answers.filter((a) => !a.isCorrect).length;
         emptyCount = Math.max(0, totalQuestions - answers.length);
+
+        const subtestScores = await this.prisma.tryOutSubtestScore.findMany({
+          where: { tryOutAttemptId: latestFinished.id },
+          select: { subtestId: true, score: true },
+        });
+        subtestScoresMap = new Map<string, number>();
+        for (const sc of subtestScores) {
+          subtestScoresMap.set(sc.subtestId, Math.round(sc.score));
+        }
       }
     }
 
@@ -419,6 +432,7 @@ export class TryoutService {
       tryout,
       answeredQuestionIds,
       userAnswersMap,
+      subtestScoresMap,
     );
     if (isUserPremium) {
       dto.unlockedSolutions = [

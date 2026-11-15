@@ -52,6 +52,7 @@ export class TryoutDetailDto {
     questionCount: number;
     duration: number;
     isCompleted: boolean;
+    score?: number;
     correctCount?: number;
     wrongCount?: number;
     emptyCount?: number;

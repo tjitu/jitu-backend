@@ -1,11 +1,29 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ExamService } from './exam.service';
 import { PrismaService } from '../../prisma.service';
+import { IrtService } from '../irt/irt.service';
+
+const irtServiceMock = {
+  calculateAndSaveAttemptScore: jest.fn().mockResolvedValue({
+    overallScore: 650,
+    subtestScores: [],
+  }),
+};
 
 const prismaMock = {
   $queryRaw: jest.fn().mockResolvedValue([
-    { id: 'tryout-1', curationStatus: 'PUBLISHED' },
+    {
+      id: 'tryout-1',
+      curationStatus: 'PUBLISHED',
+      questionsReleased: true,
+      breakSeconds: 60,
+    },
   ]),
+  tryOut: {
+    findUnique: jest
+      .fn()
+      .mockResolvedValue({ scheduledStart: null, scheduledEnd: null }),
+  },
   subtest: {
     findMany: jest.fn(),
   },
@@ -38,8 +56,8 @@ describe('ExamService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ExamService,
-
         { provide: PrismaService, useValue: prismaMock },
+        { provide: IrtService, useValue: irtServiceMock },
       ],
     }).compile();
 
@@ -222,7 +240,9 @@ describe('ExamService', () => {
         .mockResolvedValueOnce({ isCorrect: true })
         .mockResolvedValueOnce({ isCorrect: false });
 
-      prismaMock.tryOutAttempt.update.mockResolvedValue(finishedAttempt);
+      prismaMock.tryOutAttempt.findUnique
+        .mockResolvedValueOnce({ userId: 'user-1', status: 'IN_PROGRESS' })
+        .mockResolvedValueOnce(finishedAttempt);
 
       const result = await service.finishExam('attempt-1', 'user-1');
 
@@ -239,15 +259,10 @@ describe('ExamService', () => {
         data: { isCorrect: false },
       });
 
-      expect(prismaMock.tryOutAttempt.update).toHaveBeenCalledWith({
-        where: { id: 'attempt-1' },
-
-        data: {
-          status: 'FINISHED',
-          totalScore: 2,
-          finishedAt: expect.any(Date),
-        },
-      });
+      expect(irtServiceMock.calculateAndSaveAttemptScore).toHaveBeenCalledWith(
+        'attempt-1',
+        'user-1',
+      );
       expect(result).toEqual(finishedAttempt);
     });
 

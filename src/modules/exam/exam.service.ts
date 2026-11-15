@@ -11,12 +11,16 @@ import { switchMap } from 'rxjs/operators';
 import { throwError } from 'rxjs';
 import { MessageEvent } from './interfaces';
 import { resolveTryoutAccess } from '../tryout/tryout-curation.helper';
+import { IrtService } from '../irt/irt.service';
 
 @Injectable()
 export class ExamService {
   private readonly logger = new Logger(ExamService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private irtService: IrtService,
+  ) {}
 
   async startExam(tryOutId: string, userId: string, sandboxToken?: string) {
     const { curationStatus, questionsReleased, canSandbox } =
@@ -405,7 +409,6 @@ export class ExamService {
     });
 
     // 2. Grade each answer and update in database
-    let totalScore = 0;
     for (const answer of answers) {
       const isCorrect = await this.gradeAnswer({
         questionItemId: answer.questionItemId,
@@ -418,20 +421,17 @@ export class ExamService {
         where: { id: answer.id },
         data: { isCorrect },
       });
-
-      // Add points if correct
-      if (isCorrect) {
-        totalScore += answer.question.points || 0;
-      }
     }
 
-    // 3. Update attempt status and score
-    return this.prisma.tryOutAttempt.update({
+    // 3. Calculate 3PL EAP IRT scores (per subtest and composite overall score) & persist
+    await this.irtService.calculateAndSaveAttemptScore(attemptId, userId);
+
+    return this.prisma.tryOutAttempt.findUnique({
       where: { id: attemptId },
-      data: {
-        status: 'FINISHED',
-        totalScore,
-        finishedAt: new Date(),
+      include: {
+        subtestScores: {
+          orderBy: { subtest: { order: 'asc' } },
+        },
       },
     });
   }
