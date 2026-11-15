@@ -18,6 +18,7 @@ jitu-backend/
 │   ├── modules/          # Domain-driven NestJS modules
 │   │   ├── auth/         # Authentication endpoints & session management
 │   │   ├── tryout/       # Tryout creation, registration, scoring, subtests
+│   │   ├── irt/          # 3PL EAP IRT engine, item calibration & UTBK scaled scoring
 │   │   ├── question/     # Question bank, options, explanations
 │   │   ├── user/         # Student profiles, targets, history
 │   │   ├── payment/      # Midtrans payment gateway webhook & order state
