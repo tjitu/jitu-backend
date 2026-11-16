@@ -172,6 +172,7 @@ model Subtest {
 
   tryOut    TryOut     @relation(fields: [tryOutId], references: [id], onDelete: Cascade)
   questions Question[]
+  scores    TryOutSubtestScore[]
 }
 
 model Question {
@@ -184,6 +185,9 @@ model Question {
   explanation   String?      @db.Text
   points        Int          @default(1)
   correctAnswer String?      @map("correct_answer_short_answer")
+  irtA          Float?       @default(1.0) @map("irt_a")
+  irtB          Float?       @default(0.0) @map("irt_b")
+  irtC          Float?       @default(0.0) @map("irt_c")
 
   subtest     Subtest?           @relation(fields: [subtestId], references: [id])
   items       QuestionItem[]
@@ -302,9 +306,31 @@ model TryOutAttempt {
   currentSubtestOrder Int       @default(1) @map("current_subtest_order")
   subtestStartedAt    DateTime? @map("subtest_started_at")
 
-  user    User         @relation(fields: [userId], references: [id])
-  tryOut  TryOut       @relation(fields: [tryOutId], references: [id])
-  answers UserAnswer[]
+  user          User                 @relation(fields: [userId], references: [id])
+  tryOut        TryOut               @relation(fields: [tryOutId], references: [id])
+  answers       UserAnswer[]
+  subtestScores TryOutSubtestScore[]
+}
+
+model TryOutSubtestScore {
+  id              String       @id @default(cuid())
+  tryOutAttemptId String       @map("tryout_attempt_id")
+  subtestId       String       @map("subtest_id")
+  subtestName     SubtestName  @map("subtest_name")
+  score           Float        // Skor IRT subtes (200 - 1000)
+  theta           Float        // Kemampuan theta (-4.0 s.d. +4.0)
+  sem             Float?       // Standard Error of Measurement
+  correctCount    Int          @map("correct_count")
+  wrongCount      Int          @map("wrong_count")
+  emptyCount      Int          @map("empty_count")
+  createdAt       DateTime     @default(now()) @map("created_at")
+
+  attempt TryOutAttempt @relation(fields: [tryOutAttemptId], references: [id], onDelete: Cascade)
+  subtest Subtest       @relation(fields: [subtestId], references: [id], onDelete: Cascade)
+
+  @@unique([tryOutAttemptId, subtestId])
+  @@index([tryOutAttemptId])
+  @@index([subtestId])
 }
 
 model Article {

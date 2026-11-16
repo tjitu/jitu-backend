@@ -10,6 +10,7 @@ import { ShopModule } from './modules/shop/shop.module';
 import { TryoutModule } from './modules/tryout/tryout.module';
 import { PrismaModule } from './prisma.module';
 import { ExamModule } from './modules/exam/exam.module';
+import { IrtModule } from './modules/irt/irt.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { ProfileModule } from './modules/profile/profile.module';
 import { ArticlesModule } from './modules/articles/articles.module';
@@ -31,6 +32,7 @@ import { HealthController } from './health.controller';
     ShopModule,
     TryoutModule,
     ExamModule,
+    IrtModule,
     AdminModule,
     ProfileModule,
     ArticlesModule,

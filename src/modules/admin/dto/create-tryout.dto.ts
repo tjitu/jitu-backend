@@ -24,9 +24,6 @@ export class CreateTryoutDto {
   batch: TryoutBatch;
 
   @IsDateString()
-  releaseDate: string;
-
-  @IsDateString()
   scheduledEnd: string;
 
   @IsDateString()

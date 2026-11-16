@@ -15,8 +15,10 @@ import {
 } from './dto/tryout.dto';
 import { SubtestName } from '../../../generated/prisma/client';
 import { ExamService } from '../exam/exam.service';
+import { isUserPremiumActive } from '../../common/utils/premium.util';
 import {
   canAccessTryoutSandbox,
+  getReadyQuestionIdSet,
   getSandboxUserIdSet,
   getSandboxPreviewTryoutId,
   getTryoutCurationMap,
@@ -38,6 +40,7 @@ export class TryoutService {
     tryout: any,
     answeredQuestionIds?: Set<string>,
     userAnswersByQuestionId?: Map<string, boolean>,
+    subtestScoresBySubtestId?: Map<string, number>,
   ): TryoutDetailDto {
     const totalQuestions = (tryout.subtests ?? []).reduce(
       (sum: number, s: any) => sum + (s.questions?.length ?? 0),
@@ -102,6 +105,7 @@ export class TryoutService {
             isCompleted:
               (s.questions?.length ?? 0) > 0 &&
               answeredCount === (s.questions?.length ?? 0),
+            score: subtestScoresBySubtestId?.get(String(s.id)),
             correctCount: subtestCorrect,
             wrongCount: subtestWrong,
             emptyCount: subtestEmpty,
@@ -190,10 +194,7 @@ export class TryoutService {
       select: { tokenBalance: true, isPremium: true, premiumExpiresAt: true },
     });
 
-    const isUserPremium = Boolean(
-      user?.isPremium &&
-        (!user?.premiumExpiresAt || user.premiumExpiresAt > new Date()),
-    );
+    const isUserPremium = isUserPremiumActive(user);
 
     // Premium Pass user gets solutions unlocked without spending coins
     if (isUserPremium) {
@@ -206,12 +207,19 @@ export class TryoutService {
       throw new BadRequestException('Saldo Token tidak mencukupi');
     }
 
-    // 3. Transaksi (Potong Saldo & Unlock)
+    // 3. Transaksi (Potong Saldo & Unlock secara atomik)
     return await this.prisma.$transaction(async (tx) => {
-      await tx.user.update({
-        where: { id: userId },
+      const updated = await tx.user.updateMany({
+        where: {
+          id: userId,
+          tokenBalance: { gte: tryout.solutionPrice },
+        },
         data: { tokenBalance: { decrement: tryout.solutionPrice } },
       });
+
+      if (updated.count === 0) {
+        throw new BadRequestException('Saldo Token tidak mencukupi');
+      }
 
       await tx.tokenTransaction.create({
         data: {
@@ -232,6 +240,9 @@ export class TryoutService {
     userId?: string,
     sandboxToken?: string,
   ): Promise<TryOutCardDto[]> {
+    if (userId) {
+      await this.examService?.autoGradeExpiredAttempts?.(userId).catch(() => 0);
+    }
     const [canSandbox, previewTryoutId] = await Promise.all([
       canAccessTryoutSandbox(this.prisma, userId),
       getSandboxPreviewTryoutId(this.prisma, sandboxToken),
@@ -246,7 +257,12 @@ export class TryoutService {
       include: {
         _count: { select: { attempts: true } },
         // Include attempts only if a user is logged in
-        attempts: userId ? { where: { userId } } : false,
+        attempts: userId
+          ? {
+              where: { userId },
+              orderBy: { startedAt: 'desc' },
+            }
+          : false,
       },
       orderBy: { scheduledStart: 'desc' },
     });
@@ -267,7 +283,9 @@ export class TryoutService {
     const result = visibleTryouts.map((t) => {
       const curationStatus = curationMap.get(t.id) ?? 'DRAFT';
       const isRegistered = t.attempts ? t.attempts.length > 0 : false;
-      return {
+      const latestAttempt = t.attempts?.[0];
+      const latestFinished = t.attempts?.find((a) => a.status === 'FINISHED');
+      const card: TryOutCardDto = {
         id: t.id,
         title: t.title,
         number: t.code.toString(),
@@ -284,6 +302,15 @@ export class TryoutService {
         scheduledStart: t.scheduledStart?.toISOString() ?? null,
         scheduledEnd: t.scheduledEnd?.toISOString() ?? null,
       };
+      if (userId) {
+        card.latestAttemptStatus =
+          (latestAttempt?.status as 'IN_PROGRESS' | 'FINISHED' | 'NOT_STARTED') ?? null;
+        card.latestFinishedAttemptId = latestFinished?.id ?? null;
+        if (latestAttempt?.status === 'IN_PROGRESS') {
+          card.resumeUrl = `/tryout/${t.id}/exam/${latestAttempt.currentSubtestOrder || 1}?attemptId=${encodeURIComponent(latestAttempt.id)}`;
+        }
+      }
+      return card;
     });
 
     return result;
@@ -294,6 +321,10 @@ export class TryoutService {
     userId?: string,
     sandboxToken?: string,
   ): Promise<TryoutDetailDto> {
+    if (userId) {
+      await this.examService?.autoGradeExpiredAttempts?.(userId, id);
+    }
+
     const tryout = await this.prisma.tryOut.findUnique({
       where: { id },
       include: {
@@ -315,18 +346,31 @@ export class TryoutService {
             }
           : false,
         _count: { select: { attempts: true } },
-        unlockedSolutions: userId ? { where: { userId } } : false, // FIX: Sertakan data unlock
+        unlockedSolutions: userId ? { where: { userId } } : false,
       },
     });
 
     if (!tryout) throw new NotFoundException('Tryout not found');
 
-    const { curationStatus } = await resolveTryoutAccess(
-      this.prisma,
-      id,
-      userId,
-      sandboxToken,
-    );
+    const { curationStatus, questionsReleased, breakSeconds, canSandbox } =
+      await resolveTryoutAccess(
+        this.prisma,
+        id,
+        userId,
+        sandboxToken,
+      );
+
+    if (!canSandbox && tryout.subtests?.length) {
+      const readyIds = await getReadyQuestionIdSet(this.prisma, id);
+      if (readyIds) {
+        tryout.subtests = tryout.subtests.map((subtest: any) => ({
+          ...subtest,
+          questions: (subtest.questions ?? []).filter((q: any) =>
+            readyIds.has(String(q.id)),
+          ),
+        }));
+      }
+    }
 
     let answeredQuestionIds = new Set<string>();
     if (
@@ -356,6 +400,9 @@ export class TryoutService {
       | null = null;
     let latestAttemptId: string | null = null;
     let currentSubtestOrder = 1;
+    let isWaitingTransition = false;
+    let nextSubtestOrder: number | null = null;
+    let resumeUrl: string | null = null;
     let latestScore = 0;
     let correctCount = 0;
     let wrongCount = 0;
@@ -367,15 +414,50 @@ export class TryoutService {
       0,
     );
 
+    let subtestScoresMap: Map<string, number> | undefined = undefined;
+
     if (userId) {
       const latestAttempt = await this.prisma.tryOutAttempt.findFirst({
         where: { userId, tryOutId: id },
         orderBy: { startedAt: 'desc' },
-        select: { id: true, status: true, currentSubtestOrder: true },
+        select: {
+          id: true,
+          status: true,
+          startedAt: true,
+          currentSubtestOrder: true,
+          subtestStartedAt: true,
+        },
       });
       latestAttemptStatus = (latestAttempt?.status as any) ?? null;
       latestAttemptId = latestAttempt?.id ?? null;
       currentSubtestOrder = latestAttempt?.currentSubtestOrder ?? 1;
+
+      if (latestAttempt?.status === 'IN_PROGRESS') {
+        const orderedSubtests = [...(tryout.subtests ?? [])].sort(
+          (a: any, b: any) => (a.order ?? 0) - (b.order ?? 0),
+        );
+        const activeSubtest = orderedSubtests.find(
+          (s: any) => s.order === currentSubtestOrder,
+        );
+        const timerStartMs = latestAttempt.subtestStartedAt
+          ? new Date(latestAttempt.subtestStartedAt).getTime()
+          : new Date(latestAttempt.startedAt).getTime();
+        const timerEndMs =
+          timerStartMs + (activeSubtest?.durationMinutes ?? 0) * 60_000;
+
+        if (activeSubtest && Date.now() >= timerEndMs) {
+          const nextSubtest = orderedSubtests.find(
+            (s: any) => s.order > currentSubtestOrder,
+          );
+          if (nextSubtest) {
+            isWaitingTransition = true;
+            nextSubtestOrder = nextSubtest.order;
+            resumeUrl = `/tryout/${id}/break/${nextSubtest.order}?attemptId=${encodeURIComponent(latestAttempt.id)}&expired=true`;
+          }
+        } else {
+          resumeUrl = `/tryout/${id}/exam/${currentSubtestOrder}?attemptId=${encodeURIComponent(latestAttempt.id)}`;
+        }
+      }
 
       const latestFinished = await this.prisma.tryOutAttempt.findFirst({
         where: { userId, tryOutId: id, status: 'FINISHED' },
@@ -387,6 +469,9 @@ export class TryoutService {
         },
       });
       latestFinishedAttemptId = latestFinished?.id ?? null;
+      if (latestAttemptStatus === 'FINISHED' && latestFinishedAttemptId) {
+        resumeUrl = `/tryout/${id}`;
+      }
       latestScore = latestFinished?.totalScore
         ? Math.round(latestFinished.totalScore)
         : 0;
@@ -400,6 +485,15 @@ export class TryoutService {
         correctCount = answers.filter((a) => a.isCorrect).length;
         wrongCount = answers.filter((a) => !a.isCorrect).length;
         emptyCount = Math.max(0, totalQuestions - answers.length);
+
+        const subtestScores = await this.prisma.tryOutSubtestScore.findMany({
+          where: { tryOutAttemptId: latestFinished.id },
+          select: { subtestId: true, score: true },
+        });
+        subtestScoresMap = new Map<string, number>();
+        for (const sc of subtestScores) {
+          subtestScoresMap.set(sc.subtestId, Math.round(sc.score));
+        }
       }
     }
 
@@ -409,15 +503,13 @@ export class TryoutService {
           select: { isPremium: true, premiumExpiresAt: true },
         })
       : null;
-    const isUserPremium = Boolean(
-      user?.isPremium &&
-        (!user?.premiumExpiresAt || user.premiumExpiresAt > new Date()),
-    );
+    const isUserPremium = isUserPremiumActive(user);
 
     const dto = this.mapTryoutToDto(
       tryout,
       answeredQuestionIds,
       userAnswersMap,
+      subtestScoresMap,
     );
     if (isUserPremium) {
       dto.unlockedSolutions = [
@@ -430,11 +522,16 @@ export class TryoutService {
       latestAttemptStatus,
       latestAttemptId,
       currentSubtestOrder,
+      isWaitingTransition,
+      nextSubtestOrder,
+      resumeUrl,
       latestScore,
       correctCount,
       wrongCount,
       emptyCount,
       curationStatus,
+      questionsReleased,
+      breakSeconds,
       isSandboxPreview: curationStatus !== 'PUBLISHED',
     };
   }
@@ -529,12 +626,19 @@ export class TryoutService {
     attemptId?: string,
     sandboxToken?: string,
   ) {
-    const { curationStatus } = await resolveTryoutAccess(
-      this.prisma,
-      tryOutId,
-      userId,
-      sandboxToken,
-    );
+    const { curationStatus, questionsReleased, breakSeconds, canSandbox } =
+      await resolveTryoutAccess(
+        this.prisma,
+        tryOutId,
+        userId,
+        sandboxToken,
+      );
+
+    if (!canSandbox && !questionsReleased) {
+      throw new BadRequestException(
+        'Soal ujian untuk Tryout ini belum diluncurkan oleh panitia. Silakan tunggu hingga jadwal peluncuran soal.',
+      );
+    }
 
     let subtest: any;
     const order = Number(subtestIdOrOrder);
@@ -586,34 +690,40 @@ export class TryoutService {
       );
     }
 
-    // --- AUTO FINISH LOGIC (DIPERBAIKI) ---
+    // --- AUTO FINISH LOGIC ---
+    // Hanya auto-finish jika jadwal tryout berakhir (PUBLISHED + scheduledEnd lewat)
+    // atau jika subtest aktif terakhir waktunya sudah habis.
     if (currentAttempt && currentAttempt.status === 'IN_PROGRESS') {
       const now = new Date();
-
-      // 1. Cek Durasi Pengerjaan (+ alokasi jeda 1 menit antar subtes)
-      const totalDuration = currentAttempt.tryOut.subtests.reduce(
-        (acc, s) => acc + (s.durationMinutes || 0),
-        0,
+      const orderedAttemptSubtests = [...(currentAttempt.tryOut.subtests ?? [])].sort(
+        (a: any, b: any) => (a.order ?? 0) - (b.order ?? 0),
       );
-      const breakAllowanceMs =
-        Math.max(0, (currentAttempt.tryOut.subtests?.length ?? 1) - 1) * 60_000;
-      const expiryTime = new Date(
-        currentAttempt.startedAt.getTime() +
-          totalDuration * 60000 +
-          breakAllowanceMs,
+      const activeAttemptSubtest = orderedAttemptSubtests.find(
+        (s: any) => s.order === currentAttempt.currentSubtestOrder,
+      );
+      const activeTimerStartMs = currentAttempt.subtestStartedAt
+        ? new Date(currentAttempt.subtestStartedAt).getTime()
+        : new Date(currentAttempt.startedAt).getTime();
+      const activeTimerEndMs =
+        activeTimerStartMs + (activeAttemptSubtest?.durationMinutes || 0) * 60_000;
+      const activeSubtestExpired = Boolean(
+        activeAttemptSubtest && now.getTime() >= activeTimerEndMs,
+      );
+      const hasNextAfterActive = Boolean(
+        activeAttemptSubtest &&
+          orderedAttemptSubtests.some(
+            (s: any) => s.order > activeAttemptSubtest.order,
+          ),
       );
 
-      // 2. Cek Jadwal Tryout Berakhir (lewati saat Sandbox preview agar QA leluasa menguji)
       const scheduleEnded =
         curationStatus === 'PUBLISHED' &&
         currentAttempt.tryOut.scheduledEnd &&
         now > currentAttempt.tryOut.scheduledEnd;
 
-      if (now > expiryTime || scheduleEnded) {
-        // Gunakan ExamService untuk finish agar logic skor konsisten
+      if (scheduleEnded || (activeSubtestExpired && !hasNextAfterActive)) {
         currentAttempt = await this.examService.finishExam(currentAttempt.id, userId);
 
-        // Reload attempt dengan relation yang dibutuhkan
         currentAttempt = await this.prisma.tryOutAttempt.findUnique({
           where: { id: currentAttempt.id },
           include: { tryOut: { include: { subtests: true } } },
@@ -654,10 +764,7 @@ export class TryoutService {
         where: { id: userId },
         select: { isPremium: true, premiumExpiresAt: true },
       });
-      const isUserPremium = Boolean(
-        user?.isPremium &&
-          (!user?.premiumExpiresAt || user.premiumExpiresAt > new Date()),
-      );
+      const isUserPremium = isUserPremiumActive(user);
 
       if (isUserPremium) {
         showSolution = true;
@@ -680,7 +787,11 @@ export class TryoutService {
       }
     }
 
-    const questions = await this.prisma.question.findMany({
+    const readyIds = !canSandbox
+      ? await getReadyQuestionIdSet(this.prisma, tryOutId)
+      : null;
+
+    const rawQuestions = await this.prisma.question.findMany({
       where: { subtestId: subtest.id },
       orderBy: { id: 'asc' },
       include: {
@@ -688,13 +799,16 @@ export class TryoutService {
         userAnswers: { where: { tryOutAttemptId: currentAttempt.id } },
       },
     });
+    const questions = readyIds
+      ? rawQuestions.filter((q) => readyIds.has(String(q.id)))
+      : rawQuestions;
 
     const tryoutInfo = await this.prisma.tryOut.findUnique({
       where: { id: tryOutId },
       include: {
         subtests: {
           include: {
-            _count: { select: { questions: true } },
+            questions: { select: { id: true } },
           },
           orderBy: { order: 'asc' },
         },
@@ -714,6 +828,10 @@ export class TryoutService {
           Math.floor((timerEndDate.getTime() - serverNow.getTime()) / 1000),
         )
       : 0;
+    const subtestExpired = !isReviewMode && remainingSeconds <= 0;
+    const nextSubtest = tryoutInfo?.subtests?.find(
+      (s) => s.order > subtest.order,
+    );
 
     return {
       subtestId: subtest.order,
@@ -721,16 +839,21 @@ export class TryoutService {
       tryOutId,
       tryoutTitle: tryoutInfo?.title || 'Tryout',
       durationMinutes: subtest.durationMinutes,
+      breakSeconds,
       curationStatus,
       endTime: !isReviewMode ? timerEndDate.toISOString() : null,
       serverTime: !isReviewMode ? serverNow.toISOString() : null,
       remainingSeconds: !isReviewMode ? remainingSeconds : null,
+      subtestExpired,
+      nextSubtestOrder: nextSubtest?.order ?? null,
       allSubtests: tryoutInfo?.subtests.map((s) => ({
         id: s.id,
         name: s.name,
         order: s.order,
         durationMinutes: s.durationMinutes,
-        questionCount: s._count.questions,
+        questionCount: readyIds
+          ? (s.questions ?? []).filter((q) => readyIds.has(String(q.id))).length
+          : (s.questions ?? []).length,
       })),
       questions: questions.map((q: any) => {
         const ua = q.userAnswers?.[0];

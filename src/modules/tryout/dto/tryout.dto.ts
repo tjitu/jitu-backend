@@ -14,6 +14,9 @@ export class TryOutCardDto {
   isSandboxPreview?: boolean;
   scheduledStart?: string | null;
   scheduledEnd?: string | null;
+  latestAttemptStatus?: 'IN_PROGRESS' | 'FINISHED' | 'NOT_STARTED' | null;
+  latestFinishedAttemptId?: string | null;
+  resumeUrl?: string | null;
 }
 
 export class SubjectDto {
@@ -42,6 +45,9 @@ export class TryoutDetailDto {
   latestAttemptStatus?: 'IN_PROGRESS' | 'FINISHED' | 'NOT_STARTED' | null;
   latestAttemptId?: string | null;
   currentSubtestOrder?: number;
+  isWaitingTransition?: boolean;
+  nextSubtestOrder?: number | null;
+  resumeUrl?: string | null;
   latestScore?: number;
   correctCount?: number;
   wrongCount?: number;
@@ -52,6 +58,7 @@ export class TryoutDetailDto {
     questionCount: number;
     duration: number;
     isCompleted: boolean;
+    score?: number;
     correctCount?: number;
     wrongCount?: number;
     emptyCount?: number;
@@ -60,6 +67,8 @@ export class TryoutDetailDto {
   requirements: string[];
   unlockedSolutions: any[];
   curationStatus?: string;
+  questionsReleased?: boolean;
+  breakSeconds?: number;
   isSandboxPreview?: boolean;
 }
 

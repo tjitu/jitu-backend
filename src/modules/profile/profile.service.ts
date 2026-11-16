@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
 import { MidtransService } from '../shop/services/midtrans.service';
+import { isUserPremiumActive } from '../../common/utils/premium.util';
 
 @Injectable()
 export class ProfileService {
@@ -96,10 +97,7 @@ export class ProfileService {
         phoneNumber: user.phoneNumber || null,
         school: user.school || null,
         hasPassword,
-        isPremium: Boolean(
-          user.isPremium &&
-            (!user.premiumExpiresAt || user.premiumExpiresAt > new Date()),
-        ),
+        isPremium: isUserPremiumActive(user),
         premiumExpiresAt: user.premiumExpiresAt || null,
       },
       stats: {

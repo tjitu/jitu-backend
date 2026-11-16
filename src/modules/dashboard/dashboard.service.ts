@@ -17,6 +17,7 @@ import {
   getTryoutCurationMap,
   canAccessTryoutSandbox,
 } from '../tryout/tryout-curation.helper';
+import { isUserPremiumActive } from '../../common/utils/premium.util';
 
 enum TryoutStatus {
   NOT_STARTED = 'NOT_STARTED',
@@ -143,10 +144,7 @@ export class DashboardService {
       tokenBalance: user?.tokenBalance || 0,
       currentStreak,
       solvedQuestions,
-      isPremium: Boolean(
-        user?.isPremium &&
-          (!user?.premiumExpiresAt || user.premiumExpiresAt > new Date()),
-      ),
+      isPremium: isUserPremiumActive(user),
       premiumExpiresAt: user?.premiumExpiresAt || null,
     };
   }
@@ -509,11 +507,22 @@ export class DashboardService {
         _count: {
           select: { attempts: true },
         },
+        subtests: {
+          orderBy: { order: 'asc' },
+          select: { order: true, durationMinutes: true },
+        },
         attempts: {
           where: { userId },
-          select: { id: true, status: true, totalScore: true }, // Select score
-          orderBy: { startedAt: 'desc' }, // Ambil attempt terbaru
-          take: 1,
+          select: {
+            id: true,
+            status: true,
+            startedAt: true,
+            finishedAt: true,
+            totalScore: true,
+            currentSubtestOrder: true,
+            subtestStartedAt: true,
+          },
+          orderBy: { startedAt: 'desc' },
         },
       },
       orderBy: { scheduledStart: 'desc' },
@@ -535,12 +544,54 @@ export class DashboardService {
     });
 
     return visibleTryouts.map((t) => {
-      const now = new Date();
-      let status = t.attempts.length > 0 ? t.attempts[0].status : undefined;
+      const latestAttempt = t.attempts[0] ?? null;
+      const latestFinished = t.attempts.find((a) => a.status === 'FINISHED') ?? null;
+      let status: string | undefined = latestAttempt?.status;
 
-      // Force status to FINISHED if tryout expired (Override attempt status)
-      if (t.scheduledEnd && now > t.scheduledEnd) {
+      if (t.scheduledEnd && now > t.scheduledEnd && status === 'IN_PROGRESS') {
         status = 'FINISHED';
+      } else if (t.scheduledEnd && now > t.scheduledEnd && !status) {
+        status = 'FINISHED';
+      }
+
+      let isWaitingTransition = false;
+      let nextSubtestOrder: number | null = null;
+      let resumeUrl: string | null = null;
+
+      if (status === 'IN_PROGRESS' && latestAttempt) {
+        const orderedSubtests = [...(t.subtests ?? [])].sort(
+          (a, b) => (a.order ?? 0) - (b.order ?? 0),
+        );
+        const currentOrder = latestAttempt.currentSubtestOrder || 1;
+        const activeSubtest = orderedSubtests.find(
+          (s) => s.order === currentOrder,
+        );
+        const timerStartMs = latestAttempt.subtestStartedAt
+          ? new Date(latestAttempt.subtestStartedAt).getTime()
+          : new Date(latestAttempt.startedAt).getTime();
+        const timerEndMs =
+          timerStartMs + (activeSubtest?.durationMinutes || 0) * 60_000;
+
+        if (activeSubtest && now.getTime() >= timerEndMs) {
+          const nextSubtest = orderedSubtests.find(
+            (s) => s.order > currentOrder,
+          );
+          if (nextSubtest) {
+            isWaitingTransition = true;
+            nextSubtestOrder = nextSubtest.order;
+            resumeUrl = `/tryout/${t.id}/break/${nextSubtest.order}?attemptId=${encodeURIComponent(latestAttempt.id)}&expired=true`;
+          } else {
+            status = 'FINISHED';
+            resumeUrl = `/tryout/${t.id}`;
+          }
+        } else {
+          resumeUrl = `/tryout/${t.id}/exam/${currentOrder}?attemptId=${encodeURIComponent(latestAttempt.id)}`;
+        }
+      } else if (status === 'FINISHED' && (latestFinished || latestAttempt)) {
+        const finishedId = latestFinished?.id ?? latestAttempt?.id;
+        if (finishedId) {
+          resumeUrl = `/tryout/${t.id}`;
+        }
       }
 
       return {
@@ -555,8 +606,13 @@ export class DashboardService {
         createdAt: t.createdAt,
         participants: t._count.attempts,
         isRegistered: t.attempts.length > 0,
-        status: status,
-        score: t.attempts.length > 0 ? t.attempts[0].totalScore : undefined, // Map score
+        status,
+        latestAttemptId: latestAttempt?.id ?? null,
+        latestFinishedAttemptId: latestFinished?.id ?? null,
+        resumeUrl,
+        isWaitingTransition,
+        nextSubtestOrder,
+        score: latestFinished?.totalScore ?? latestAttempt?.totalScore,
       };
     });
   }

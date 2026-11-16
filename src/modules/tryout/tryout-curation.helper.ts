@@ -145,25 +145,132 @@ export async function getSandboxUserIdSet(
   }
 }
 
+/** Fetches curation_status, questions_released, and break_seconds for a tryout cleanly even if schema migration ran out-of-band. */
+export async function getTryoutGovernanceMeta(
+  prisma: PrismaService,
+  tryoutId: string,
+): Promise<{
+  curationStatus: TryoutCurationStatus;
+  questionsReleased: boolean;
+  breakSeconds: number;
+}> {
+  if (!tryoutId) {
+    return { curationStatus: 'DRAFT', questionsReleased: false, breakSeconds: 60 };
+  }
+
+  try {
+    const rows = await prisma.$queryRaw<
+      Array<{
+        curationStatus: string | null;
+        questionsReleased: boolean | null;
+        breakSeconds: number | null;
+        scheduledStart: Date | null;
+        isPublic: boolean | null;
+      }>
+    >(
+      Prisma.sql`SELECT
+        COALESCE("curation_status", 'PUBLISHED') AS "curationStatus",
+        COALESCE("questions_released", COALESCE("curation_status", 'PUBLISHED') = 'PUBLISHED') AS "questionsReleased",
+        COALESCE("break_seconds", 60)::int AS "breakSeconds",
+        "scheduledStart",
+        "isPublic"
+       FROM public."TryOut"
+       WHERE "id" = ${tryoutId}
+       LIMIT 1`,
+    );
+    const row = rows[0];
+    if (!row) {
+      return { curationStatus: 'DRAFT', questionsReleased: false, breakSeconds: 60 };
+    }
+    const normalized = String(row.curationStatus || 'PUBLISHED')
+      .toUpperCase()
+      .trim() as TryoutCurationStatus;
+    const isLiveBySchedule =
+      normalized === 'PUBLISHED' &&
+      Boolean(row.isPublic ?? true) &&
+      (!row.scheduledStart || new Date(row.scheduledStart).getTime() <= Date.now());
+    return {
+      curationStatus: normalized,
+      questionsReleased: Boolean(row.questionsReleased) || isLiveBySchedule,
+      breakSeconds: Math.max(0, Math.min(1800, Number(row.breakSeconds ?? 60))),
+    };
+  } catch (error) {
+    if (postgresErrorCode(error) !== '42703') {
+      throw new ServiceUnavailableException(
+        'Status kurasi tryout sedang tidak tersedia.',
+      );
+    }
+    const map = await getTryoutCurationMap(prisma, [tryoutId]);
+    const curationStatus = map.get(tryoutId) ?? 'PUBLISHED';
+    return {
+      curationStatus,
+      questionsReleased: curationStatus === 'PUBLISHED',
+      breakSeconds: 60,
+    };
+  }
+}
+
+/**
+ * Returns the set of question IDs in a tryout whose status is READY.
+ * Falls back to null (meaning no status column / do not filter) if older DBs lack Question.status.
+ */
+export async function getReadyQuestionIdSet(
+  prisma: PrismaService,
+  tryOutId: string,
+): Promise<Set<string> | null> {
+  if (!tryOutId) return new Set();
+  const queryRaw = (prisma as unknown as { $queryRaw?: unknown })?.$queryRaw;
+  if (typeof queryRaw !== 'function') return null;
+
+  try {
+    const rows = await prisma.$queryRaw<Array<{ readyQuestionId?: string }>>(
+      Prisma.sql`SELECT DISTINCT q."id" AS "readyQuestionId"
+       FROM public."Question" q
+       LEFT JOIN public."Subtest" sub ON sub."id" = q."subtest_id"
+       WHERE (q."tryoutId" = ${tryOutId} OR sub."try_out_id" = ${tryOutId})
+         AND COALESCE(q."status", 'DRAFT') = 'READY'`,
+    );
+    if (rows.length > 0 && !('readyQuestionId' in rows[0])) {
+      return null;
+    }
+    return new Set(
+      rows
+        .map((r) => r.readyQuestionId)
+        .filter((id): id is string => Boolean(id))
+        .map(String),
+    );
+  } catch (error) {
+    if (postgresErrorCode(error) === '42703') {
+      return null;
+    }
+    return null;
+  }
+}
+
 /** Verifies whether a user/token is permitted to view or attempt a tryout given its curation state. */
 export async function resolveTryoutAccess(
   prisma: PrismaService,
   tryoutId: string,
   userId?: string | null,
   sandboxToken?: string | null,
-): Promise<{ curationStatus: TryoutCurationStatus; canSandbox: boolean }> {
-  const [curationMap, canSandbox] = await Promise.all([
-    getTryoutCurationMap(prisma, [tryoutId]),
+): Promise<{
+  curationStatus: TryoutCurationStatus;
+  questionsReleased: boolean;
+  breakSeconds: number;
+  canSandbox: boolean;
+}> {
+  const [meta, canSandbox] = await Promise.all([
+    getTryoutGovernanceMeta(prisma, tryoutId),
     canAccessTryoutSandbox(prisma, userId, tryoutId, sandboxToken),
   ]);
-  const curationStatus = curationMap.get(tryoutId) ?? 'DRAFT';
+  const { curationStatus, questionsReleased, breakSeconds } = meta;
 
   if (curationStatus === 'PUBLISHED') {
-    return { curationStatus, canSandbox };
+    return { curationStatus, questionsReleased, breakSeconds, canSandbox };
   }
 
   if (canSandbox) {
-    return { curationStatus, canSandbox };
+    return { curationStatus, questionsReleased, breakSeconds, canSandbox };
   }
 
   throw new NotFoundException(

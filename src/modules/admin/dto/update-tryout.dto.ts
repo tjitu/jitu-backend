@@ -17,10 +17,6 @@ export class UpdateTryoutDto {
 
   @IsDateString()
   @IsOptional()
-  releaseDate?: string;
-
-  @IsDateString()
-  @IsOptional()
   scheduledStart?: string;
 
   @IsDateString()

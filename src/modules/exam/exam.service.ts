@@ -4,27 +4,109 @@ import {
   ForbiddenException,
   InternalServerErrorException,
   Logger,
+  OnModuleInit,
+  OnModuleDestroy,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service'; // Sesuaikan path ini jika perlu
 import { Observable, of, from } from 'rxjs';
 import { switchMap } from 'rxjs/operators';
 import { throwError } from 'rxjs';
 import { MessageEvent } from './interfaces';
-import { resolveTryoutAccess } from '../tryout/tryout-curation.helper';
+import {
+  getReadyQuestionIdSet,
+  getSandboxUserIdSet,
+  resolveTryoutAccess,
+} from '../tryout/tryout-curation.helper';
+import { IrtService } from '../irt/irt.service';
 
 @Injectable()
-export class ExamService {
+export class ExamService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ExamService.name);
+  private autoGradeTimer: NodeJS.Timeout | null = null;
+  private isSweepingExpired = false;
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private irtService: IrtService,
+  ) {}
+
+  onModuleInit() {
+    if (process.env.NODE_ENV === 'test' || process.env.JEST_WORKER_ID) return;
+    this.autoGradeTimer = setInterval(() => {
+      void this.autoGradeExpiredAttempts().catch(() => undefined);
+    }, 60_000);
+  }
+
+  onModuleDestroy() {
+    if (this.autoGradeTimer) {
+      clearInterval(this.autoGradeTimer);
+      this.autoGradeTimer = null;
+    }
+  }
+
+  /**
+   * Auto-submits and IRT-grades IN_PROGRESS attempts whose tryout scheduledEnd has passed.
+   */
+  async autoGradeExpiredAttempts(userId?: string, tryOutId?: string): Promise<number> {
+    if (this.isSweepingExpired && !userId) return 0;
+    const findMany = (this.prisma?.tryOutAttempt as { findMany?: unknown } | undefined)?.findMany;
+    if (typeof findMany !== 'function') return 0;
+
+    if (!userId) this.isSweepingExpired = true;
+    try {
+      const now = new Date();
+      const [expiredAttempts, sandboxUserIds] = await Promise.all([
+        this.prisma.tryOutAttempt.findMany({
+          where: {
+            status: 'IN_PROGRESS',
+            ...(userId ? { userId } : {}),
+            ...(tryOutId ? { tryOutId } : {}),
+            tryOut: {
+              scheduledEnd: { lt: now },
+            },
+          },
+          select: {
+            id: true,
+            userId: true,
+            tryOutId: true,
+          },
+          take: 50,
+        }),
+        getSandboxUserIdSet(this.prisma).catch(() => new Set<string>()),
+      ]);
+
+      let gradedCount = 0;
+      for (const att of expiredAttempts) {
+        if (sandboxUserIds.has(att.userId)) continue;
+        try {
+          await this.finishExam(att.id, att.userId);
+          gradedCount += 1;
+        } catch (err) {
+          this.logger.warn(
+            `Auto-grade failed for attempt ${att.id}: ${err instanceof Error ? err.message : 'unknown'}`,
+          );
+        }
+      }
+      return gradedCount;
+    } finally {
+      if (!userId) this.isSweepingExpired = false;
+    }
+  }
 
   async startExam(tryOutId: string, userId: string, sandboxToken?: string) {
-    const { curationStatus, canSandbox } = await resolveTryoutAccess(
-      this.prisma,
-      tryOutId,
-      userId,
-      sandboxToken,
-    );
+    const { curationStatus, questionsReleased, canSandbox } =
+      await resolveTryoutAccess(
+        this.prisma,
+        tryOutId,
+        userId,
+        sandboxToken,
+      );
+
+    if (!canSandbox && !questionsReleased) {
+      throw new BadRequestException(
+        'Soal ujian untuk Tryout ini belum diluncurkan oleh panitia. Silakan tunggu hingga soal dibuka menjelang jadwal pelaksanaan.',
+      );
+    }
 
     if (curationStatus === 'PUBLISHED' && !canSandbox) {
       const tryout = await this.prisma.tryOut.findUnique({
@@ -38,6 +120,7 @@ export class ExamService {
         );
       }
       if (tryout?.scheduledEnd && now > tryout.scheduledEnd) {
+        await this.autoGradeExpiredAttempts(userId, tryOutId);
         throw new BadRequestException('Masa pengerjaan tryout sudah berakhir.');
       }
     }
@@ -56,8 +139,48 @@ export class ExamService {
     }
 
     // 2. If an attempt already exists, handle based on status
-    // If it's already in progress, just return it.
+    // If it's already in progress, check whether the active subtest has expired while disconnected.
     if (existingAttempt.status === 'IN_PROGRESS') {
+      if (existingAttempt.subtestStartedAt) {
+        const subtests = await this.prisma.subtest.findMany({
+          where: { tryOutId },
+          orderBy: { order: 'asc' },
+          include: {
+            questions: { select: { id: true } },
+          },
+        });
+        const readyIds = canSandbox
+          ? null
+          : await getReadyQuestionIdSet(this.prisma, tryOutId);
+        const populatedSubtests = subtests.filter((sub) => {
+          const qs = sub.questions ?? [];
+          return readyIds ? qs.some((q) => readyIds.has(q.id)) : qs.length > 0;
+        });
+        const activeSubtests = populatedSubtests.length > 0 ? populatedSubtests : subtests;
+        const currentSubtest = activeSubtests.find(
+          (s) => s.order === existingAttempt.currentSubtestOrder,
+        );
+        if (currentSubtest && currentSubtest.durationMinutes > 0) {
+          const endMs =
+            new Date(existingAttempt.subtestStartedAt).getTime() +
+            currentSubtest.durationMinutes * 60_000;
+          if (Date.now() >= endMs) {
+            const nextSubtest = activeSubtests.find(
+              (s) => s.order > existingAttempt.currentSubtestOrder,
+            );
+            if (!nextSubtest) {
+              return this.finishExam(existingAttempt.id, userId);
+            }
+            return {
+              ...existingAttempt,
+              subtestExpired: true,
+              isWaitingTransition: true,
+              nextSubtestOrder: nextSubtest.order,
+              nextSubtestName: nextSubtest.name,
+            };
+          }
+        }
+      }
       return existingAttempt;
     }
 
@@ -68,8 +191,25 @@ export class ExamService {
         orderBy: { order: 'asc' },
         include: { _count: { select: { questions: true } } },
       });
-      const firstPopulatedOrder =
+      let firstPopulatedOrder =
         tryoutSubtests.find((s) => s._count.questions > 0)?.order ?? 1;
+
+      if (!canSandbox) {
+        const readyIds = await getReadyQuestionIdSet(this.prisma, tryOutId);
+        if (readyIds) {
+          const subtestQuestions = await this.prisma.subtest.findMany({
+            where: { tryOutId },
+            orderBy: { order: 'asc' },
+            include: { questions: { select: { id: true } } },
+          });
+          const readySubtest = subtestQuestions.find((s) =>
+            (s.questions ?? []).some((q) => readyIds.has(q.id)),
+          );
+          if (readySubtest) {
+            firstPopulatedOrder = readySubtest.order;
+          }
+        }
+      }
 
       return this.prisma.tryOutAttempt.update({
         where: { id: existingAttempt.id },
@@ -118,7 +258,23 @@ export class ExamService {
       orderBy: { order: 'asc' },
       include: { _count: { select: { questions: true } } },
     });
-    const populatedSubtests = subtests.filter((subtest) => subtest._count.questions > 0);
+    let populatedSubtests = subtests.filter((subtest) => subtest._count.questions > 0);
+    const readyIds = await getReadyQuestionIdSet(this.prisma, attempt.tryOutId);
+    if (readyIds) {
+      const subtestQs = await this.prisma.subtest.findMany({
+        where: { tryOutId: attempt.tryOutId },
+        orderBy: { order: 'asc' },
+        include: { questions: { select: { id: true } } },
+      });
+      const readyOrderSet = new Set(
+        subtestQs
+          .filter((s) => (s.questions ?? []).some((q) => readyIds.has(q.id)))
+          .map((s) => s.order),
+      );
+      if (readyOrderSet.size > 0) {
+        populatedSubtests = populatedSubtests.filter((s) => readyOrderSet.has(s.order));
+      }
+    }
     const activeSubtests = populatedSubtests.length > 0 ? populatedSubtests : subtests;
     const nextSubtest = activeSubtests.find(
       (subtest) => subtest.order > attempt.currentSubtestOrder,
@@ -252,6 +408,15 @@ export class ExamService {
           userId: true,
           tryOutId: true,
           currentSubtestOrder: true,
+          subtestStartedAt: true,
+          tryOut: {
+            select: {
+              scheduledEnd: true,
+              subtests: {
+                select: { order: true, durationMinutes: true },
+              },
+            },
+          },
         },
       });
 
@@ -269,6 +434,24 @@ export class ExamService {
       }
       if (attempt.status !== 'IN_PROGRESS') {
         throw new BadRequestException('Ujian belum dimulai.');
+      }
+
+      if (attempt.tryOut?.scheduledEnd && Date.now() > new Date(attempt.tryOut.scheduledEnd).getTime() + 5000) {
+        throw new BadRequestException('Masa pengerjaan tryout sudah berakhir.');
+      }
+
+      if (attempt.subtestStartedAt && attempt.tryOut?.subtests) {
+        const activeSub = attempt.tryOut.subtests.find(
+          (s) => s.order === attempt.currentSubtestOrder,
+        );
+        if (activeSub && activeSub.durationMinutes > 0) {
+          const subtestEndMs =
+            new Date(attempt.subtestStartedAt).getTime() +
+            activeSub.durationMinutes * 60_000;
+          if (Date.now() > subtestEndMs + 5000) {
+            throw new BadRequestException('Waktu subtes ini sudah habis.');
+          }
+        }
       }
 
       const question = await this.prisma.question.findFirst({
@@ -387,6 +570,16 @@ export class ExamService {
     if (attempt.userId !== userId) {
       throw new ForbiddenException('Kamu tidak memiliki akses ke sesi tryout ini.');
     }
+    if (attempt.status === 'FINISHED') {
+      return this.prisma.tryOutAttempt.findUnique({
+        where: { id: attemptId },
+        include: {
+          subtestScores: {
+            orderBy: { subtest: { order: 'asc' } },
+          },
+        },
+      });
+    }
     if (attempt.status !== 'IN_PROGRESS') {
       throw new BadRequestException('Attempt tidak aktif atau sudah selesai.');
     }
@@ -398,7 +591,6 @@ export class ExamService {
     });
 
     // 2. Grade each answer and update in database
-    let totalScore = 0;
     for (const answer of answers) {
       const isCorrect = await this.gradeAnswer({
         questionItemId: answer.questionItemId,
@@ -411,20 +603,17 @@ export class ExamService {
         where: { id: answer.id },
         data: { isCorrect },
       });
-
-      // Add points if correct
-      if (isCorrect) {
-        totalScore += answer.question.points || 0;
-      }
     }
 
-    // 3. Update attempt status and score
-    return this.prisma.tryOutAttempt.update({
+    // 3. Calculate 3PL EAP IRT scores (per subtest and composite overall score) & persist
+    await this.irtService.calculateAndSaveAttemptScore(attemptId, userId);
+
+    return this.prisma.tryOutAttempt.findUnique({
       where: { id: attemptId },
-      data: {
-        status: 'FINISHED',
-        totalScore,
-        finishedAt: new Date(),
+      include: {
+        subtestScores: {
+          orderBy: { subtest: { order: 'asc' } },
+        },
       },
     });
   }
