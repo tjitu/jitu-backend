@@ -248,7 +248,12 @@ describe('ExamService', () => {
 
       expect(prismaMock.userAnswer.findMany).toHaveBeenCalledWith({
         where: { tryOutAttemptId: 'attempt-1' },
-        include: { question: true },
+        select: {
+          id: true,
+          questionId: true,
+          questionItemId: true,
+          inputText: true,
+        },
       });
       expect(prismaMock.userAnswer.update).toHaveBeenNthCalledWith(1, {
         where: { id: 'ans-1' },

@@ -587,7 +587,12 @@ export class ExamService implements OnModuleInit, OnModuleDestroy {
     // 1. Get all answers for this attempt
     const answers = await this.prisma.userAnswer.findMany({
       where: { tryOutAttemptId: attemptId },
-      include: { question: true },
+      select: {
+        id: true,
+        questionId: true,
+        questionItemId: true,
+        inputText: true,
+      },
     });
 
     // 2. Grade each answer and update in database
