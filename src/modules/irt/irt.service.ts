@@ -11,6 +11,10 @@ import {
   TryoutIrtEvaluationResult,
 } from './irt.types';
 import { QuestionType, SubtestName } from '../../../generated/prisma/client';
+import {
+  canAccessTryoutSandbox,
+  getReadyQuestionIdSet,
+} from '../tryout/tryout-curation.helper';
 
 @Injectable()
 export class IrtService {
@@ -60,6 +64,16 @@ export class IrtService {
       throw new NotFoundException(`Attempt ${attemptId} tidak ditemukan.`);
     }
 
+    const effectiveUserId = userId || attempt.userId;
+    const isSandboxUser = await canAccessTryoutSandbox(
+      this.prisma,
+      effectiveUserId,
+      attempt.tryOutId,
+    ).catch(() => false);
+    const readyIds = isSandboxUser
+      ? null
+      : await getReadyQuestionIdSet(this.prisma, attempt.tryOutId);
+
     // Build fast lookup for student's graded answers
     const answersMap = new Map<string, boolean>();
     for (const ans of attempt.answers) {
@@ -69,7 +83,10 @@ export class IrtService {
     const subtestInputs: SubtestEvaluationInput[] = [];
 
     for (const subtest of attempt.tryOut.subtests) {
-      const questions = subtest.questions || [];
+      const rawQuestions = subtest.questions || [];
+      const questions = readyIds
+        ? rawQuestions.filter((q) => readyIds.has(q.id))
+        : rawQuestions;
       const items: StudentItemEvaluation[] = questions.map((q) => {
         const isAnswered = answersMap.has(q.id);
         const isCorrect = isAnswered && answersMap.get(q.id) === true;

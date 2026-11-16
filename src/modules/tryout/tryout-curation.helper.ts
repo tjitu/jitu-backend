@@ -164,12 +164,16 @@ export async function getTryoutGovernanceMeta(
         curationStatus: string | null;
         questionsReleased: boolean | null;
         breakSeconds: number | null;
+        scheduledStart: Date | null;
+        isPublic: boolean | null;
       }>
     >(
       Prisma.sql`SELECT
         COALESCE("curation_status", 'PUBLISHED') AS "curationStatus",
         COALESCE("questions_released", COALESCE("curation_status", 'PUBLISHED') = 'PUBLISHED') AS "questionsReleased",
-        COALESCE("break_seconds", 60)::int AS "breakSeconds"
+        COALESCE("break_seconds", 60)::int AS "breakSeconds",
+        "scheduledStart",
+        "isPublic"
        FROM public."TryOut"
        WHERE "id" = ${tryoutId}
        LIMIT 1`,
@@ -181,9 +185,13 @@ export async function getTryoutGovernanceMeta(
     const normalized = String(row.curationStatus || 'PUBLISHED')
       .toUpperCase()
       .trim() as TryoutCurationStatus;
+    const isLiveBySchedule =
+      normalized === 'PUBLISHED' &&
+      Boolean(row.isPublic ?? true) &&
+      (!row.scheduledStart || new Date(row.scheduledStart).getTime() <= Date.now());
     return {
       curationStatus: normalized,
-      questionsReleased: Boolean(row.questionsReleased),
+      questionsReleased: Boolean(row.questionsReleased) || isLiveBySchedule,
       breakSeconds: Math.max(0, Math.min(1800, Number(row.breakSeconds ?? 60))),
     };
   } catch (error) {
@@ -199,6 +207,43 @@ export async function getTryoutGovernanceMeta(
       questionsReleased: curationStatus === 'PUBLISHED',
       breakSeconds: 60,
     };
+  }
+}
+
+/**
+ * Returns the set of question IDs in a tryout whose status is READY.
+ * Falls back to null (meaning no status column / do not filter) if older DBs lack Question.status.
+ */
+export async function getReadyQuestionIdSet(
+  prisma: PrismaService,
+  tryOutId: string,
+): Promise<Set<string> | null> {
+  if (!tryOutId) return new Set();
+  const queryRaw = (prisma as unknown as { $queryRaw?: unknown })?.$queryRaw;
+  if (typeof queryRaw !== 'function') return null;
+
+  try {
+    const rows = await prisma.$queryRaw<Array<{ readyQuestionId?: string }>>(
+      Prisma.sql`SELECT DISTINCT q."id" AS "readyQuestionId"
+       FROM public."Question" q
+       LEFT JOIN public."Subtest" sub ON sub."id" = q."subtest_id"
+       WHERE (q."tryoutId" = ${tryOutId} OR sub."try_out_id" = ${tryOutId})
+         AND COALESCE(q."status", 'DRAFT') = 'READY'`,
+    );
+    if (rows.length > 0 && !('readyQuestionId' in rows[0])) {
+      return null;
+    }
+    return new Set(
+      rows
+        .map((r) => r.readyQuestionId)
+        .filter((id): id is string => Boolean(id))
+        .map(String),
+    );
+  } catch (error) {
+    if (postgresErrorCode(error) === '42703') {
+      return null;
+    }
+    return null;
   }
 }
 

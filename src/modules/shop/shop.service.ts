@@ -673,6 +673,15 @@ export class ShopService {
           },
         });
 
+        await tx.tokenTransaction.create({
+          data: {
+            userId: res.userId,
+            amount: res.tokenAmount,
+            type: 'TOPUP',
+            referenceId: `PAYMENT_ID: ${res.id}`,
+          },
+        });
+
         // If payment used a voucher, increment usedCount and record usage
         if (res.voucherId) {
           await tx.voucher
@@ -831,15 +840,22 @@ export class ShopService {
             return { alreadyConfirmed: true, credited: false };
           }
 
-          await tx.payment.update({
-            where: { id: currentPayment.id },
-            data: {
-              status: newStatus,
-              metadata,
-            },
-          });
-
           if (newStatus === PaymentStatus.CONFIRMED) {
+            const confirmUpdate = await tx.payment.updateMany({
+              where: {
+                id: currentPayment.id,
+                status: { not: PaymentStatus.CONFIRMED },
+              },
+              data: {
+                status: newStatus,
+                metadata,
+              },
+            });
+
+            if (confirmUpdate.count === 0) {
+              return { alreadyConfirmed: true, credited: false };
+            }
+
             const pkgName =
               currentPayment.tokenPackage?.name ||
               (currentPayment.metadata as any)?.package_name ||
@@ -874,6 +890,15 @@ export class ShopService {
               },
             });
 
+            await tx.tokenTransaction.create({
+              data: {
+                userId: currentPayment.userId,
+                amount: currentPayment.tokenAmount,
+                type: 'TOPUP',
+                referenceId: `PAYMENT_ID: ${currentPayment.id}`,
+              },
+            });
+
             // If payment used a voucher, increment usedCount and record usage
             if (currentPayment.voucherId) {
               await tx.voucher
@@ -901,6 +926,14 @@ export class ShopService {
 
             return { alreadyConfirmed: false, credited: true };
           }
+
+          await tx.payment.update({
+            where: { id: currentPayment.id },
+            data: {
+              status: newStatus,
+              metadata,
+            },
+          });
 
           return { alreadyConfirmed: false, credited: false };
         },

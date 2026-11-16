@@ -109,5 +109,10 @@ export class OngoingTryoutDto {
   participants: number;
   isRegistered: boolean;
   status?: string; // IN_PROGRESS, FINISHED, NOT_STARTED
+  latestAttemptId?: string | null;
+  latestFinishedAttemptId?: string | null;
+  resumeUrl?: string | null;
+  isWaitingTransition?: boolean;
+  nextSubtestOrder?: number | null;
   score?: number;
 }

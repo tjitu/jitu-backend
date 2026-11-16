@@ -97,7 +97,6 @@ describe('AdminService', () => {
       description: 'Desc',
       solutionPrice: 10,
       batch: TryoutBatch.SNBT as any,
-      releaseDate: new Date().toISOString(),
       scheduledEnd: new Date(
         new Date().setDate(new Date().getDate() + 5),
       ).toISOString(),
