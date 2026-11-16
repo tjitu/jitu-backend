@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma.service';
 import { ExamService } from '../exam/exam.service';
 
 const prismaMock = {
+  $transaction: jest.fn(),
   $queryRaw: jest.fn().mockResolvedValue([
     { id: 'cku1tryout1', curationStatus: 'PUBLISHED' },
     { id: 'cku1tryout2', curationStatus: 'PUBLISHED' },
@@ -93,11 +94,66 @@ describe('TryoutService', () => {
       { id: 'cku1tryout1', curationStatus: 'PUBLISHED' },
       { id: 'cku1tryout2', curationStatus: 'PUBLISHED' },
     ]);
+    prismaMock.$transaction.mockReset();
     prismaMock.tryOut.findMany.mockClear();
     prismaMock.tryOut.findUnique.mockClear();
     prismaMock.tryOutAttempt.findFirst.mockClear();
     prismaMock.userAnswer.findMany.mockClear();
     prismaMock.user.findUnique.mockResolvedValue(null);
+  });
+
+  describe('registerTryout', () => {
+    const setup = (price: number) => {
+      prismaMock.tryOut.findUnique.mockResolvedValue({
+        id: 'tryout-1', solutionPrice: price, scheduledEnd: null,
+      });
+      prismaMock.$queryRaw.mockResolvedValue([{
+        curationStatus: 'PUBLISHED', questionsReleased: true, breakSeconds: 60,
+      }]);
+      const tx = {
+        $queryRaw: jest.fn()
+          .mockResolvedValueOnce([{ id: 'user-1' }])
+          .mockResolvedValueOnce([{ solutionPrice: price }]),
+        tryOutAttempt: {
+          findFirst: jest.fn().mockResolvedValue(null),
+          create: jest.fn().mockResolvedValue({ id: 'attempt-1' }),
+        },
+        unlockedSolution: {
+          findFirst: jest.fn().mockResolvedValue(null),
+          create: jest.fn().mockResolvedValue({ id: 'unlock-1' }),
+        },
+        user: {
+          findUnique: jest.fn().mockResolvedValue({ isPremium: false, premiumExpiresAt: null }),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        tokenTransaction: { create: jest.fn().mockResolvedValue({ id: 'tx-1' }) },
+      };
+      prismaMock.$transaction.mockImplementation((callback) => callback(tx));
+      return tx;
+    };
+
+    it('registers the free mode without spending coin', async () => {
+      const tx = setup(3);
+      const result = await service.registerTryout('user-1', 'tryout-1', undefined, 'FREE', 3);
+      expect(result.attemptId).toBe('attempt-1');
+      expect(result.isPremium).toBe(false);
+      expect(tx.user.updateMany).not.toHaveBeenCalled();
+      expect(tx.unlockedSolution.create).not.toHaveBeenCalled();
+    });
+
+    it('charges the confirmed price and unlocks atomically in premium mode', async () => {
+      const tx = setup(3);
+      const result = await service.registerTryout('user-1', 'tryout-1', undefined, 'PREMIUM', 3);
+      expect(result.isPremium).toBe(true);
+      expect(tx.user.updateMany).toHaveBeenCalledWith({
+        where: { id: 'user-1', tokenBalance: { gte: 3 } },
+        data: { tokenBalance: { decrement: 3 } },
+      });
+      expect(tx.tokenTransaction.create).toHaveBeenCalledWith({
+        data: { userId: 'user-1', amount: -3, type: 'PURCHASE_SOLUTION', referenceId: 'tryout-1' },
+      });
+      expect(tx.unlockedSolution.create).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('getTryouts', () => {

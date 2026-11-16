@@ -116,7 +116,13 @@ export class TryoutService {
     };
   }
 
-  async registerTryout(userId: string, tryoutId: string, sandboxToken?: string) {
+  async registerTryout(
+    userId: string,
+    tryoutId: string,
+    sandboxToken?: string,
+    mode: 'FREE' | 'PREMIUM' = 'FREE',
+    expectedSolutionPrice?: number,
+  ) {
     // 1. Cek Tryout
     const tryout = await this.prisma.tryOut.findUnique({
       where: { id: tryoutId },
@@ -139,36 +145,80 @@ export class TryoutService {
       }
     }
 
-    // 2. Cek apakah user sudah terdaftar (punya attempt apa saja)
-    const existingAttempt = await this.prisma.tryOutAttempt.findFirst({
-      where: { userId, tryOutId: tryoutId },
-    });
-
-    if (existingAttempt) {
-      // Sudah terdaftar, kembalikan attemptId yang ada
-      return {
-        message: 'User sudah terdaftar pada tryout ini',
-        attemptId: existingAttempt.id,
-        isRegistered: true,
-      };
+    if (
+      expectedSolutionPrice !== undefined &&
+      expectedSolutionPrice !== tryout.solutionPrice
+    ) {
+      throw new BadRequestException(
+        `Biaya pembahasan berubah menjadi ${tryout.solutionPrice} coin. Muat ulang halaman lalu daftar kembali.`,
+      );
     }
 
-    // 3. Buat attempt baru karena pendaftaran selalu gratis
-    const newAttempt = await this.prisma.tryOutAttempt.create({
-      data: {
-        userId,
-        tryOutId: tryoutId,
-        status: 'NOT_STARTED',
-        totalScore: 0,
-        currentSubtestOrder: 0,
-      },
-    });
+    return this.prisma.$transaction(async (tx) => {
+      // Serialisasi pendaftaran dan upgrade untuk user ini agar retry tidak memotong coin dua kali.
+      await tx.$queryRaw`SELECT "id" FROM public."user" WHERE "id" = ${userId} FOR UPDATE`;
+      const lockedTryout = await tx.$queryRaw<{ solutionPrice: number }[]>`
+        SELECT "solutionPrice" FROM public."TryOut" WHERE "id" = ${tryoutId} FOR SHARE
+      `;
+      const price = Number(lockedTryout[0]?.solutionPrice ?? 0);
+      if (expectedSolutionPrice !== undefined && expectedSolutionPrice !== price) {
+        throw new BadRequestException(
+          `Biaya pembahasan berubah menjadi ${price} coin. Muat ulang halaman lalu daftar kembali.`,
+        );
+      }
+      let attempt = await tx.tryOutAttempt.findFirst({
+        where: { userId, tryOutId: tryoutId },
+      });
+      if (!attempt) {
+        attempt = await tx.tryOutAttempt.create({
+          data: {
+            userId,
+            tryOutId: tryoutId,
+            status: 'NOT_STARTED',
+            totalScore: 0,
+            currentSubtestOrder: 0,
+          },
+        });
+      }
 
-    return {
-      message: 'Berhasil mendaftar tryout',
-      attemptId: newAttempt.id,
-      isRegistered: true,
-    };
+      if (mode === 'PREMIUM' && price > 0) {
+        const unlocked = await tx.unlockedSolution.findFirst({
+          where: { userId, tryOutId: tryoutId },
+        });
+        const user = await tx.user.findUnique({
+          where: { id: userId },
+          select: { isPremium: true, premiumExpiresAt: true },
+        });
+        if (!unlocked && !isUserPremiumActive(user)) {
+          const updated = await tx.user.updateMany({
+            where: { id: userId, tokenBalance: { gte: price } },
+            data: { tokenBalance: { decrement: price } },
+          });
+          if (updated.count === 0) {
+            throw new BadRequestException('Coin tidak cukup. Buka Shop untuk mendapatkan coin.');
+          }
+          await tx.tokenTransaction.create({
+            data: {
+              userId,
+              amount: -price,
+              type: 'PURCHASE_SOLUTION',
+              referenceId: tryoutId,
+            },
+          });
+          await tx.unlockedSolution.create({ data: { userId, tryOutId: tryoutId } });
+        }
+      }
+
+      return {
+        message: mode === 'PREMIUM' && price > 0
+          ? 'Berhasil daftar dengan pembahasan.'
+          : 'Berhasil mendaftar tryout',
+        attemptId: attempt.id,
+        isRegistered: true,
+        isPremium: mode === 'PREMIUM' && price > 0,
+        solutionPrice: price,
+      };
+    });
   }
 
   /**
@@ -256,6 +306,10 @@ export class TryoutService {
           : { isPublic: true },
       include: {
         _count: { select: { attempts: true } },
+        subtests: {
+          select: { order: true, durationMinutes: true },
+          orderBy: { order: 'asc' },
+        },
         // Include attempts only if a user is logged in
         attempts: userId
           ? {
@@ -307,7 +361,19 @@ export class TryoutService {
           (latestAttempt?.status as 'IN_PROGRESS' | 'FINISHED' | 'NOT_STARTED') ?? null;
         card.latestFinishedAttemptId = latestFinished?.id ?? null;
         if (latestAttempt?.status === 'IN_PROGRESS') {
-          card.resumeUrl = `/tryout/${t.id}/exam/${latestAttempt.currentSubtestOrder || 1}?attemptId=${encodeURIComponent(latestAttempt.id)}`;
+          const currentOrder = latestAttempt.currentSubtestOrder || 1;
+          const activeSubtest = t.subtests.find((sub) => sub.order === currentOrder);
+          const startedAt = latestAttempt.subtestStartedAt ?? latestAttempt.startedAt;
+          const expired = Boolean(
+            activeSubtest && startedAt &&
+            Date.now() >= new Date(startedAt).getTime() + activeSubtest.durationMinutes * 60_000,
+          );
+          const nextSubtest = expired
+            ? t.subtests.find((sub) => sub.order > currentOrder)
+            : null;
+          card.resumeUrl = nextSubtest
+            ? `/tryout/${t.id}/break/${nextSubtest.order}?attemptId=${encodeURIComponent(latestAttempt.id)}&expired=true`
+            : `/tryout/${t.id}/exam/${currentOrder}?attemptId=${encodeURIComponent(latestAttempt.id)}`;
         }
       }
       return card;
@@ -504,12 +570,16 @@ export class TryoutService {
         })
       : null;
     const isUserPremium = isUserPremiumActive(user);
+    const hasResultAccess =
+      tryout.solutionPrice === 0 ||
+      isUserPremium ||
+      (tryout.unlockedSolutions?.length ?? 0) > 0;
 
     const dto = this.mapTryoutToDto(
       tryout,
       answeredQuestionIds,
-      userAnswersMap,
-      subtestScoresMap,
+      hasResultAccess ? userAnswersMap : undefined,
+      hasResultAccess ? subtestScoresMap : undefined,
     );
     if (isUserPremium) {
       dto.unlockedSolutions = [
@@ -525,10 +595,10 @@ export class TryoutService {
       isWaitingTransition,
       nextSubtestOrder,
       resumeUrl,
-      latestScore,
-      correctCount,
-      wrongCount,
-      emptyCount,
+      latestScore: hasResultAccess ? latestScore : 0,
+      correctCount: hasResultAccess ? correctCount : 0,
+      wrongCount: hasResultAccess ? wrongCount : 0,
+      emptyCount: hasResultAccess ? emptyCount : 0,
       curationStatus,
       questionsReleased,
       breakSeconds,
@@ -542,11 +612,26 @@ export class TryoutService {
   ): Promise<LeaderboardDto> {
     const tryout = await this.prisma.tryOut.findUnique({
       where: { id: tryoutId },
-      select: { scheduledEnd: true },
+      select: { scheduledEnd: true, solutionPrice: true },
     });
 
     if (!tryout) {
       throw new NotFoundException('Tryout not found');
+    }
+
+    if (tryout.solutionPrice > 0) {
+      const [unlock, user] = await Promise.all([
+        this.prisma.unlockedSolution.findFirst({ where: { userId, tryOutId: tryoutId } }),
+        this.prisma.user.findUnique({
+          where: { id: userId },
+          select: { isPremium: true, premiumExpiresAt: true },
+        }),
+      ]);
+      if (!unlock && !isUserPremiumActive(user)) {
+        throw new ForbiddenException(
+          `Upgrade ${tryout.solutionPrice} coin untuk melihat ranking.`,
+        );
+      }
     }
 
     if (!tryout.scheduledEnd) {
