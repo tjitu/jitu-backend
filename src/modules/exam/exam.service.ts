@@ -506,6 +506,11 @@ export class ExamService implements OnModuleInit, OnModuleDestroy {
         },
       });
 
+      // Update streak for active tryout attempt (minimal mengerjakan 1 soal tryout)
+      this.updateUserStreakForActivity(userId).catch((err) => {
+        this.logger.warn(`Failed to update user streak in tryout: ${err?.message || err}`);
+      });
+
       return result;
     } catch (error) {
       if (error instanceof BadRequestException || error instanceof ForbiddenException) throw error;
@@ -517,6 +522,51 @@ export class ExamService implements OnModuleInit, OnModuleDestroy {
       });
 
       throw new InternalServerErrorException('Failed to save answer');
+    }
+  }
+
+  /**
+   * Updates user daily streak on question activity (WIB / UTC+7 timezone).
+   * Ensures streak increases once per day across tryout & practice.
+   */
+  private async updateUserStreakForActivity(userId: string): Promise<void> {
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { currentStreak: true, lastDailyDate: true },
+      });
+      if (!user) return;
+
+      const now = new Date();
+      const toWibDate = (d: Date) => {
+        const wib = new Date(d.getTime() + 7 * 60 * 60 * 1000);
+        return wib.toISOString().slice(0, 10);
+      };
+
+      const todayStr = toWibDate(now);
+      const lastDate = user.lastDailyDate;
+      const lastDateStr = lastDate ? toWibDate(new Date(lastDate)) : null;
+
+      // Already recorded activity today -> maintain current streak
+      if (lastDateStr === todayStr) return;
+
+      const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      const yesterdayStr = toWibDate(yesterday);
+
+      let newStreak = 1;
+      if (lastDateStr === yesterdayStr) {
+        newStreak = (user.currentStreak || 0) + 1;
+      }
+
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: {
+          currentStreak: newStreak,
+          lastDailyDate: now,
+        },
+      });
+    } catch (e) {
+      this.logger.warn(`Error updating user streak in exam: ${e instanceof Error ? e.message : e}`);
     }
   }
 
