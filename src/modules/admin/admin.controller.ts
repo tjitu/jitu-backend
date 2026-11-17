@@ -29,7 +29,6 @@ import { AdminPackageService } from './services/package.service';
 import { CreatePackageDto, UpdatePackageDto } from './dto/package.dto';
 import { AdminDailyService } from './services/daily.service';
 import { AdminTryoutResultService } from './services/result.service';
-import { AdminAiService } from './services/ai.service';
 import { PaymentStatus } from 'generated/prisma/enums';
 import { AdminAuthGuard } from '../../guards/auth.guard';
 
@@ -46,7 +45,6 @@ export class AdminController {
     private readonly packageService: AdminPackageService,
     private readonly dailyService: AdminDailyService,
     private readonly resultService: AdminTryoutResultService,
-    private readonly aiService: AdminAiService,
   ) {}
 
   // --- DASHBOARD ---
@@ -317,99 +315,4 @@ export class AdminController {
     return this.resultService.exportResults(id, type as any);
   }
 
-  // --- AI GENERATOR ---
-  @Get('ai/status')
-  getAiStatus() {
-    return this.aiService.getStatus();
-  }
-
-  @Post('ai/batches')
-  createAiBatch(@Body() body: Record<string, unknown>) {
-    return this.aiService.createBatch(body);
-  }
-
-  @Get('ai/batches')
-  getAiBatches() {
-    return this.aiService.getBatches();
-  }
-
-  @Get('ai/batches/:id')
-  getAiBatch(@Param('id') id: string) {
-    return this.aiService.getBatch(id);
-  }
-
-  @Post('ai/batches/:id/start')
-  startAiBatch(@Param('id') id: string) {
-    return this.aiService.startBatch(id);
-  }
-
-  @Post('ai/batches/:id/cancel')
-  cancelAiBatch(@Param('id') id: string) {
-    return this.aiService.cancelBatch(id);
-  }
-
-  @Get('ai/batches/:id/drafts')
-  getAiBatchDrafts(@Param('id') id: string) {
-    return this.aiService.getBatchDrafts(id);
-  }
-
-  @Get('ai/drafts/:id')
-  getAiDraft(@Param('id') id: string) {
-    return this.aiService.getDraft(id);
-  }
-
-  @Patch('ai/drafts/:id')
-  updateAiDraft(
-    @Param('id') id: string,
-    @Body() body: Record<string, unknown>,
-  ) {
-    return this.aiService.updateDraft(id, body);
-  }
-
-  @Post('ai/drafts/:id/approve')
-  approveAiDraft(@Param('id') id: string) {
-    return this.aiService.approveDraft(id);
-  }
-
-  @Post('ai/drafts/:id/reject')
-  rejectAiDraft(
-    @Param('id') id: string,
-    @Body() body: Record<string, unknown>,
-  ) {
-    return this.aiService.rejectDraft(id, body);
-  }
-
-  @Post('ai/drafts/:id/regenerate')
-  regenerateAiDraft(
-    @Param('id') id: string,
-    @Body() body: Record<string, unknown>,
-  ) {
-    return this.aiService.regenerateDraft(id, body);
-  }
-
-  @Post('ai/drafts/:id/assets/image')
-  generateAiDraftImage(
-    @Param('id') id: string,
-    @Body() body: Record<string, unknown>,
-  ) {
-    return this.aiService.generateDraftImage(id, body);
-  }
-
-  @Post('ai/drafts/:id/assets/video')
-  generateAiDraftVideo(
-    @Param('id') id: string,
-    @Body() body: Record<string, unknown>,
-  ) {
-    return this.aiService.generateDraftVideo(id, body);
-  }
-
-  @Post('ai/publish/batches/:batchId')
-  async publishAiBatch(@Param('batchId') batchId: string): Promise<unknown> {
-    return this.aiService.publishBatch(batchId);
-  }
-
-  @Get('ai/usage/batches/:batchId')
-  getAiBatchUsage(@Param('batchId') batchId: string) {
-    return this.aiService.getBatchUsage(batchId);
-  }
 }

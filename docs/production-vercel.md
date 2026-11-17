@@ -1,6 +1,6 @@
 # Backend Production: Vercel
 
-Vercel detects this NestJS app from `src/main.ts` and deploys it as a Node.js Function. The database remains on Supabase, assets remain on Cloudinary, and authentication uses Firebase Auth. AI service hosting is outside this setup.
+Vercel detects this NestJS app from `src/main.ts` and deploys it as a Node.js Function. The database remains on Supabase, assets remain on Cloudinary, and authentication uses Firebase Auth.
 
 ## Create the backend project
 

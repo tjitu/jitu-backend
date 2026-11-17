@@ -9,7 +9,6 @@ import { AdminPaymentService } from './services/payment.service';
 import { AdminPackageService } from './services/package.service';
 import { AdminDailyService } from './services/daily.service';
 import { AdminTryoutResultService } from './services/result.service';
-import { AdminAiService } from './services/ai.service';
 import { AuthIdentityService } from '../auth/auth-identity.service';
 
 describe('AdminController', () => {
@@ -29,7 +28,6 @@ describe('AdminController', () => {
         { provide: AdminPackageService, useValue: {} },
         { provide: AdminDailyService, useValue: {} },
         { provide: AdminTryoutResultService, useValue: {} },
-        { provide: AdminAiService, useValue: {} },
       ],
     }).compile();
 

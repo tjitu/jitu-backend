@@ -26,7 +26,7 @@ jitu-backend/
 │   │   ├── referral/     # Referral codes & rewards
 │   │   ├── shop/         # Coin packages, Midtrans checkout, payment webhooks & orders
 │   │   ├── articles/     # Blog/article content endpoints
-│   │   └── admin/        # Admin operations (tryouts, questions, users, packages, payments, AI bridge)
+│   │   └── admin/        # Admin operations (tryouts, questions, users, packages, payments)
 │   └── common/           # Guards, interceptors, decorators, filters
 ├── prisma/
 │   └── schema.prisma     # Database schema (Supabase PostgreSQL)
@@ -44,4 +44,3 @@ jitu-backend/
 * **ORM**: Prisma 7 with custom output path at `generated/prisma`. Use `PrismaService` injection.
 * **Database**: PostgreSQL hosted on Supabase (`DATABASE_URL` pooler).
 * **Payment Webhooks**: Midtrans notifications handled inside `shop/` with signature validation.
-* **AI Service Client**: Communicates with `jitu-ai-service` on port 3010 for question drafting and AI review/publish pipelines.
