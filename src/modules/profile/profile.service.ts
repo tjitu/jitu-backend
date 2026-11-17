@@ -94,6 +94,7 @@ export class ProfileService {
         image: user.image,
         tokenBalance: user.tokenBalance,
         target: user.target,
+        phone: user.phoneNumber || null,
         phoneNumber: user.phoneNumber || null,
         school: user.school || null,
         hasPassword,

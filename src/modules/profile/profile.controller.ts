@@ -39,6 +39,7 @@ export class ProfileController {
     body: {
       name?: string;
       target?: string;
+      phone?: string;
       phoneNumber?: string;
       school?: string;
     },
@@ -49,6 +50,12 @@ export class ProfileController {
       throw new NotFoundException('User ID tidak ditemukan');
     }
 
-    return this.profileService.updateProfile(userId, body);
+    const phoneNumber = body.phoneNumber ?? body.phone;
+    return this.profileService.updateProfile(userId, {
+      name: body.name,
+      target: body.target,
+      phoneNumber,
+      school: body.school,
+    });
   }
 }
