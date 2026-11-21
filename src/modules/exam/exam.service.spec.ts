@@ -32,6 +32,7 @@ const prismaMock = {
     create: jest.fn(),
     findUnique: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
   },
 
   questionItem: {
@@ -285,6 +286,34 @@ describe('ExamService', () => {
   });
 
   describe('startSubtest', () => {
+    it('does not reset the timer when two starts race', async () => {
+      const initial = {
+        id: 'attempt-1', userId: 'user-1', tryOutId: 'tryout-1',
+        currentSubtestOrder: 1, status: 'IN_PROGRESS', subtestStartedAt: new Date('2026-11-19T00:00:00Z'),
+      };
+      let current = { ...initial };
+      prismaMock.tryOutAttempt.findUnique
+        .mockResolvedValueOnce({ ...initial })
+        .mockResolvedValueOnce({ ...initial })
+        .mockImplementation(async () => ({ ...current }));
+      prismaMock.subtest.findMany.mockResolvedValue([
+        { order: 1, _count: { questions: 5 } },
+        { order: 2, _count: { questions: 5 } },
+      ]);
+      prismaMock.tryOutAttempt.updateMany.mockImplementation(async ({ where, data }) => {
+        if (current.currentSubtestOrder !== where.currentSubtestOrder) return { count: 0 };
+        current = { ...current, ...data };
+        return { count: 1 };
+      });
+      const [first, second] = await Promise.all([
+        service.startSubtest('attempt-1', 2, 'user-1'),
+        service.startSubtest('attempt-1', 2, 'user-1'),
+      ]);
+      expect(first.subtestStartedAt).toEqual(second.subtestStartedAt);
+      expect(first.currentSubtestOrder).toBe(2);
+      expect(prismaMock.tryOutAttempt.updateMany).toHaveBeenCalledTimes(2);
+    });
+
     it('rejects attempts to skip a populated subtest', async () => {
       prismaMock.tryOutAttempt.findUnique.mockResolvedValue({
         id: 'attempt-1',

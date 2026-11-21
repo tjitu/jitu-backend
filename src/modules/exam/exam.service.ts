@@ -283,14 +283,19 @@ export class ExamService implements OnModuleInit, OnModuleDestroy {
       throw new ForbiddenException('Kamu hanya bisa melanjutkan ke subtes berikutnya.');
     }
 
-    // Update waktu mulai subtes baru
-    return this.prisma.tryOutAttempt.update({
-      where: { id: attemptId },
+    // Only one concurrent request may advance the attempt and set its timer.
+    await this.prisma.tryOutAttempt.updateMany({
+      where: { id: attemptId, userId, status: 'IN_PROGRESS', currentSubtestOrder: attempt.currentSubtestOrder },
       data: {
         currentSubtestOrder: order,
         subtestStartedAt: new Date(),
       },
     });
+    const current = await this.prisma.tryOutAttempt.findUnique({ where: { id: attemptId } });
+    if (!current || current.status !== 'IN_PROGRESS' || current.userId !== userId || current.currentSubtestOrder !== order) {
+      throw new BadRequestException('Status subtes telah berubah. Muat ulang halaman.');
+    }
+    return current;
   }
 
   /** Computes current subtest endTime/remainingSeconds for both authenticated GET and SSE clients. */
