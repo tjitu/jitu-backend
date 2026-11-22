@@ -242,7 +242,7 @@ describe('ExamService', () => {
         .mockResolvedValueOnce({ isCorrect: false });
 
       prismaMock.tryOutAttempt.findUnique
-        .mockResolvedValueOnce({ userId: 'user-1', status: 'IN_PROGRESS' })
+        .mockResolvedValueOnce({ userId: 'user-1', status: 'IN_PROGRESS', tryOut: { scheduledEnd: new Date('2020-01-01') } })
         .mockResolvedValueOnce(finishedAttempt);
 
       const result = await service.finishExam('attempt-1', 'user-1');
@@ -270,6 +270,25 @@ describe('ExamService', () => {
         'user-1',
       );
       expect(result).toEqual(finishedAttempt);
+    });
+
+    it.each([
+      ['before the end', new Date('2099-01-01T00:00:00Z')],
+      ['without a scheduled end', null],
+    ])('hides scores on a finished attempt %s', async (_label, scheduledEnd) => {
+      prismaMock.tryOutAttempt.findUnique
+        .mockResolvedValueOnce({ userId: 'user-1', status: 'FINISHED', tryOut: { scheduledEnd } })
+        .mockResolvedValueOnce({ id: 'attempt-1', totalScore: 750, subtestScores: [{ score: 720 }] });
+      const result = await service.finishExam('attempt-1', 'user-1');
+      expect(result).toEqual({ id: 'attempt-1', totalScore: null, subtestScores: [] });
+    });
+
+    it('returns scores after the scheduled end', async () => {
+      prismaMock.tryOutAttempt.findUnique
+        .mockResolvedValueOnce({ userId: 'user-1', status: 'FINISHED', tryOut: { scheduledEnd: new Date('2020-01-01') } })
+        .mockResolvedValueOnce({ id: 'attempt-1', totalScore: 750, subtestScores: [{ score: 720 }] });
+      const result = await service.finishExam('attempt-1', 'user-1');
+      expect(result).toEqual({ id: 'attempt-1', totalScore: 750, subtestScores: [{ score: 720 }] });
     });
 
     it('does not finish another user\'s attempt', async () => {

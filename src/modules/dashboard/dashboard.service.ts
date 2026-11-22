@@ -107,12 +107,12 @@ export class DashboardService {
         },
       }),
       this.prisma.tryOutAttempt.findFirst({
-        where: { userId, status: TryoutStatus.FINISHED },
+        where: { userId, status: TryoutStatus.FINISHED, tryOut: { scheduledEnd: { lte: new Date() } } },
         orderBy: { finishedAt: 'desc' },
         select: { totalScore: true },
       }),
       this.prisma.tryOutAttempt.aggregate({
-        where: { userId, status: TryoutStatus.FINISHED },
+        where: { userId, status: TryoutStatus.FINISHED, tryOut: { scheduledEnd: { lte: new Date() } } },
         _max: { totalScore: true },
       }),
       this.prisma.tryOutAttempt.count({
@@ -391,6 +391,7 @@ export class DashboardService {
       where: {
         userId,
         status: 'FINISHED',
+        tryOut: { scheduledEnd: { lte: new Date() } },
       },
       orderBy: {
         finishedAt: 'asc',
@@ -612,7 +613,9 @@ export class DashboardService {
         resumeUrl,
         isWaitingTransition,
         nextSubtestOrder,
-        score: latestFinished?.totalScore ?? latestAttempt?.totalScore,
+        score: t.scheduledEnd && t.scheduledEnd <= now
+          ? latestFinished?.totalScore ?? latestAttempt?.totalScore
+          : undefined,
       };
     });
   }

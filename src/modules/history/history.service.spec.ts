@@ -40,6 +40,7 @@ describe('HistoryService', () => {
             id: 'to-1',
             title: 'Try Out SNBT 1',
             batch: 'SNBT',
+            scheduledEnd: new Date('2024-01-01T12:00:00Z'),
             subtests: [
               { questions: [{}, {}, {}] }, // Subtest 1: 3 soal
               { questions: [{}, {}] }, // Subtest 2: 2 soal (Total 5 soal)

@@ -2,7 +2,7 @@ export class TryoutHistoryDto {
   id: string;
   title: string;
   date: string;
-  score: number;
+  score: number | null;
   maxScore: number;
   duration: string;
   questionsAnswered: number;

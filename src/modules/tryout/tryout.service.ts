@@ -1,3 +1,4 @@
+import { areTryoutResultsAvailable } from '../../common/utils/tryout-results.util';
 import {
   Injectable,
   NotFoundException,
@@ -575,11 +576,12 @@ export class TryoutService {
       isUserPremium ||
       (tryout.unlockedSolutions?.length ?? 0) > 0;
 
+    const resultsAvailable = areTryoutResultsAvailable(tryout.scheduledEnd);
     const dto = this.mapTryoutToDto(
       tryout,
       answeredQuestionIds,
       hasResultAccess ? userAnswersMap : undefined,
-      hasResultAccess ? subtestScoresMap : undefined,
+      hasResultAccess && resultsAvailable ? subtestScoresMap : undefined,
     );
     if (isUserPremium) {
       dto.unlockedSolutions = [
@@ -595,7 +597,8 @@ export class TryoutService {
       isWaitingTransition,
       nextSubtestOrder,
       resumeUrl,
-      latestScore: hasResultAccess ? latestScore : 0,
+      latestScore: hasResultAccess && resultsAvailable ? latestScore : null,
+      resultsAvailable,
       correctCount: hasResultAccess ? correctCount : 0,
       wrongCount: hasResultAccess ? wrongCount : 0,
       emptyCount: hasResultAccess ? emptyCount : 0,

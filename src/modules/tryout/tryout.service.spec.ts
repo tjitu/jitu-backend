@@ -102,6 +102,15 @@ describe('TryoutService', () => {
     prismaMock.user.findUnique.mockResolvedValue(null);
   });
 
+  describe('leaderboard release', () => {
+    it.each([null, new Date('2099-01-01T00:00:00Z')])(
+      'rejects requests before a scheduled end (%s)', async (scheduledEnd) => {
+        prismaMock.tryOut.findUnique.mockResolvedValue({ scheduledEnd, solutionPrice: 0 });
+        await expect(service.getLeaderboard('tryout-1', 'user-1')).rejects.toThrow();
+      },
+    );
+  });
+
   describe('registerTryout', () => {
     const setup = (price: number) => {
       prismaMock.tryOut.findUnique.mockResolvedValue({
@@ -280,7 +289,8 @@ describe('TryoutService', () => {
         isWaitingTransition: false,
         nextSubtestOrder: null,
         resumeUrl: null,
-        latestScore: 0,
+        latestScore: null,
+        resultsAvailable: false,
         correctCount: 0,
         wrongCount: 0,
         emptyCount: 0,

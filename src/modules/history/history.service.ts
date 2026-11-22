@@ -1,3 +1,4 @@
+import { areTryoutResultsAvailable } from '../../common/utils/tryout-results.util';
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
 import { TryoutHistoryDto } from './dto/history.dto';
@@ -84,7 +85,7 @@ export class HistoryService {
         id: tryout.tryOut.id,
         title: tryout.tryOut.title,
         date: tryout.finishedAt?.toISOString() ?? new Date().toISOString(),
-        score: Math.round(tryout.totalScore),
+        score: areTryoutResultsAvailable(tryout.tryOut.scheduledEnd) ? Math.round(tryout.totalScore) : null,
         maxScore: 1000,
         duration: `${durationMinutes} Menit`,
         questionsAnswered: tryout.answers.length,

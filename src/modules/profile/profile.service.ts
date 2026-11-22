@@ -1,3 +1,4 @@
+import { areTryoutResultsAvailable } from '../../common/utils/tryout-results.util';
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
 import { MidtransService } from '../shop/services/midtrans.service';
@@ -27,15 +28,16 @@ export class ProfileService {
       where: { userId },
       orderBy: { startedAt: 'desc' },
       take: 5,
-      include: { tryOut: { select: { title: true, batch: true } } },
+      include: { tryOut: { select: { title: true, batch: true, scheduledEnd: true } } },
     });
 
     // 2. Hitung statistik global (hanya yang FINISHED)
     const stats = await this.prisma.tryOutAttempt.aggregate({
-      where: { userId, status: 'FINISHED' },
+      where: { userId, status: 'FINISHED', tryOut: { scheduledEnd: { lte: new Date() } } },
       _avg: { totalScore: true },
-      _count: { _all: true },
     });
+
+    const totalTryout = await this.prisma.tryOutAttempt.count({ where: { userId, status: 'FINISHED' } });
 
     // 3. Ambil pending payment (jika ada) untuk ditampilkan di profile
     const pendingPayment = await this.prisma.payment.findFirst({
@@ -102,10 +104,10 @@ export class ProfileService {
         premiumExpiresAt: user.premiumExpiresAt || null,
       },
       stats: {
-        totalTryout: stats._count._all || 0,
+        totalTryout,
         averageScore: Math.round(stats._avg.totalScore || 0),
         lastScore:
-          recentAttempts.length > 0 ? recentAttempts[0].totalScore : 0,
+          recentAttempts.length > 0 && areTryoutResultsAvailable(recentAttempts[0].tryOut.scheduledEnd) ? recentAttempts[0].totalScore : 0,
         streak: user.currentStreak,
       },
       pendingPayment: paymentData,
@@ -113,8 +115,8 @@ export class ProfileService {
         id: attempt.id,
         title: attempt.tryOut.title,
         date: attempt.startedAt,
-        score: attempt.totalScore,
-        status: attempt.status === 'FINISHED' ? (attempt.totalScore > 700 ? 'EXCELLENT' : 'COMPLETED') : 'ONGOING',
+        score: attempt.status === 'FINISHED' && areTryoutResultsAvailable(attempt.tryOut.scheduledEnd) ? attempt.totalScore : null,
+        status: attempt.status === 'FINISHED' ? (areTryoutResultsAvailable(attempt.tryOut.scheduledEnd) && attempt.totalScore > 700 ? 'EXCELLENT' : 'COMPLETED') : 'ONGOING',
       })),
     };
   }

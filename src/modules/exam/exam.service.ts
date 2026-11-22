@@ -1,3 +1,4 @@
+import { areTryoutResultsAvailable } from '../../common/utils/tryout-results.util';
 import {
   Injectable,
   BadRequestException,
@@ -619,21 +620,14 @@ export class ExamService implements OnModuleInit, OnModuleDestroy {
   async finishExam(attemptId: string, userId: string) {
     const attempt = await this.prisma.tryOutAttempt.findUnique({
       where: { id: attemptId },
-      select: { userId: true, status: true },
+      select: { userId: true, status: true, tryOut: { select: { scheduledEnd: true } } },
     });
     if (!attempt) throw new BadRequestException('Attempt tidak ditemukan');
     if (attempt.userId !== userId) {
       throw new ForbiddenException('Kamu tidak memiliki akses ke sesi tryout ini.');
     }
     if (attempt.status === 'FINISHED') {
-      return this.prisma.tryOutAttempt.findUnique({
-        where: { id: attemptId },
-        include: {
-          subtestScores: {
-            orderBy: { subtest: { order: 'asc' } },
-          },
-        },
-      });
+      return this.getFinishedExamResult(attemptId, attempt.tryOut?.scheduledEnd);
     }
     if (attempt.status !== 'IN_PROGRESS') {
       throw new BadRequestException('Attempt tidak aktif atau sudah selesai.');
@@ -668,14 +662,16 @@ export class ExamService implements OnModuleInit, OnModuleDestroy {
     // 3. Calculate 3PL EAP IRT scores (per subtest and composite overall score) & persist
     await this.irtService.calculateAndSaveAttemptScore(attemptId, userId);
 
-    return this.prisma.tryOutAttempt.findUnique({
+    return this.getFinishedExamResult(attemptId, attempt.tryOut?.scheduledEnd);
+  }
+
+  private async getFinishedExamResult(attemptId: string, scheduledEnd: Date | null | undefined) {
+    const result = await this.prisma.tryOutAttempt.findUnique({
       where: { id: attemptId },
-      include: {
-        subtestScores: {
-          orderBy: { subtest: { order: 'asc' } },
-        },
-      },
+      include: { subtestScores: { orderBy: { subtest: { order: 'asc' } } } },
     });
+    if (!result || areTryoutResultsAvailable(scheduledEnd)) return result;
+    return { ...result, totalScore: null, subtestScores: [] };
   }
 
   private checkShortAnswer(rawUser: string, rawKey: string): boolean {
