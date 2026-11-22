@@ -128,6 +128,7 @@ export class ProfileService {
       target?: string;
       phoneNumber?: string;
       school?: string;
+      image?: string;
     },
   ) {
     const updateData: {
@@ -135,12 +136,14 @@ export class ProfileService {
       target?: string;
       phoneNumber?: string;
       school?: string;
+      image?: string;
     } = {};
 
     if (data.name !== undefined) updateData.name = data.name;
     if (data.target !== undefined) updateData.target = data.target;
     if (data.phoneNumber !== undefined) updateData.phoneNumber = data.phoneNumber;
     if (data.school !== undefined) updateData.school = data.school;
+    if (data.image !== undefined) updateData.image = data.image;
 
     return this.prisma.user.update({
       where: { id: userId },

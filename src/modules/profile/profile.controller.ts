@@ -42,6 +42,7 @@ export class ProfileController {
       phone?: string;
       phoneNumber?: string;
       school?: string;
+      image?: string;
     },
   ) {
     const userId = session.user.id;
@@ -56,6 +57,7 @@ export class ProfileController {
       target: body.target,
       phoneNumber,
       school: body.school,
+      image: body.image,
     });
   }
 }
