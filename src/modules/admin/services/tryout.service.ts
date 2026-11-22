@@ -1,3 +1,4 @@
+import { loadReviewSolutions } from '../../tryout/review-solutions';
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../prisma.service';
 import { CreateTryoutDto } from '../dto/create-tryout.dto';
@@ -95,7 +96,20 @@ export class AdminTryoutService {
     });
 
     if (!tryout) throw new NotFoundException('Tryout tidak ditemukan');
-    return tryout;
+    const solutions = await loadReviewSolutions(
+      this.prisma,
+      tryout.subtests.flatMap(subtest => subtest.questions.map(question => question.id)),
+    );
+    return {
+      ...tryout,
+      subtests: tryout.subtests.map(subtest => ({
+        ...subtest,
+        questions: subtest.questions.map(question => ({
+          ...question,
+          structuredSolution: solutions.get(question.id) ?? null,
+        })),
+      })),
+    };
   }
 
   async createTryout(dto: CreateTryoutDto) {

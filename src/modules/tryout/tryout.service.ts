@@ -1,3 +1,4 @@
+import { loadReviewSolutions } from './review-solutions';
 import { areTryoutResultsAvailable } from '../../common/utils/tryout-results.util';
 import {
   Injectable,
@@ -891,6 +892,10 @@ export class TryoutService {
       ? rawQuestions.filter((q) => readyIds.has(String(q.id)))
       : rawQuestions;
 
+    const reviewSolutions = showSolution
+      ? await loadReviewSolutions(this.prisma, questions.map((question) => question.id))
+      : null;
+
     const tryoutInfo = await this.prisma.tryOut.findUnique({
       where: { id: tryOutId },
       include: {
@@ -951,6 +956,9 @@ export class TryoutService {
           id: q.id,
           type: q.type,
           questionText: q.content,
+          narration: q.narration,
+          imageUrl: q.imageUrl,
+          structuredSolution: reviewSolutions?.get(q.id) ?? null,
           solution: showSolution
             ? q.explanation || 'Tidak ada pembahasan.'
             : null,
