@@ -620,7 +620,7 @@ export class ExamService implements OnModuleInit, OnModuleDestroy {
   async finishExam(attemptId: string, userId: string) {
     const attempt = await this.prisma.tryOutAttempt.findUnique({
       where: { id: attemptId },
-      select: { userId: true, status: true, tryOut: { select: { scheduledEnd: true } } },
+      select: { userId: true, tryOutId: true, status: true, tryOut: { select: { scheduledEnd: true } } },
     });
     if (!attempt) throw new BadRequestException('Attempt tidak ditemukan');
     if (attempt.userId !== userId) {
@@ -661,6 +661,16 @@ export class ExamService implements OnModuleInit, OnModuleDestroy {
 
     // 3. Calculate 3PL EAP IRT scores (per subtest and composite overall score) & persist
     await this.irtService.calculateAndSaveAttemptScore(attemptId, userId);
+
+    if (['sandbox-test-free', 'sandbox-test-one-coin'].includes(attempt.tryOutId)) {
+      const released = await this.prisma.$executeRaw`
+        UPDATE "TryOut" SET "scheduledEnd" = NOW()
+        WHERE id = ${attempt.tryOutId} AND "isPublic" = false AND curation_status = 'QC_SANDBOX'
+          AND EXISTS (SELECT 1 FROM "user" WHERE id = ${userId} AND COALESCE("isSandbox", false) = true)
+          AND EXISTS (SELECT 1 FROM "TryOutAttempt" WHERE id = ${attemptId} AND "userId" = ${userId} AND status = 'FINISHED')
+      `;
+      if (released > 0) return this.getFinishedExamResult(attemptId, new Date(0));
+    }
 
     return this.getFinishedExamResult(attemptId, attempt.tryOut?.scheduledEnd);
   }

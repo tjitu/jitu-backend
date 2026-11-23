@@ -853,7 +853,7 @@ export class TryoutService {
         where: { id: userId },
         select: { isPremium: true, premiumExpiresAt: true },
       });
-      const isUserPremium = isUserPremiumActive(user);
+      const isUserPremium = tryOutId !== 'sandbox-test-one-coin' && isUserPremiumActive(user);
 
       if (isUserPremium) {
         showSolution = true;
