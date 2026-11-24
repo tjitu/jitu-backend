@@ -831,6 +831,10 @@ export class TryoutService {
 
     if (!currentAttempt) throw new NotFoundException('Sesi tidak ditemukan');
 
+    if (!['IN_PROGRESS', 'FINISHED'].includes(currentAttempt.status)) {
+      throw new BadRequestException('Tryout belum dimulai.');
+    }
+
     const isReviewMode = currentAttempt.status === 'FINISHED';
 
     // [SECURITY] Cegah skip subtest atau akses subtest masa lalu/depan

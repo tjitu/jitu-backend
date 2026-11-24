@@ -15,7 +15,9 @@ const prismaMock = {
   },
   tryOutAttempt: {
     findFirst: jest.fn(),
+    findUnique: jest.fn(),
   },
+  subtest: { findFirst: jest.fn() },
   user: {
     findUnique: jest.fn().mockResolvedValue(null),
   },
@@ -26,6 +28,12 @@ const prismaMock = {
 
 describe('TryoutService', () => {
   let service: TryoutService;
+
+  it('rejects direct question and review access for a reset attempt', async () => {
+    prismaMock.subtest.findFirst.mockResolvedValue({ id: 'subtest-1', order: 1 });
+    prismaMock.tryOutAttempt.findUnique.mockResolvedValue({ id: 'attempt-1', userId: 'user-1', tryOutId: 'tryout-1', status: 'NOT_STARTED' });
+    await expect(service.getSubtestQuestions('tryout-1', 1, 'user-1', 'attempt-1')).rejects.toThrow('Tryout belum dimulai');
+  });
 
   const mockTryoutsComplete = [
     {
