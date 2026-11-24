@@ -16,10 +16,6 @@ export class AuthIdentityService {
   async resolveUser(token: DecodedIdToken) {
     const email = token.email?.trim().toLowerCase();
     if (!email) throw new UnauthorizedException('Akun Firebase harus memiliki email.');
-    if (token.firebase?.sign_in_provider === 'password' && token.email_verified !== true) {
-      throw new UnauthorizedException('Verifikasi email Firebase sebelum menggunakan akun Jitu.');
-    }
-
     const mappedAccount = await this.prisma.account.findFirst({
       where: { providerId: { startsWith: 'firebase-' }, accountId: token.uid },
       include: { user: true },
@@ -57,6 +53,9 @@ export class AuthIdentityService {
           where: { email: { equals: email, mode: 'insensitive' } },
         });
         if (!user) throw error;
+        if (token.email_verified !== true) {
+          throw new UnauthorizedException('Akun ini perlu ditautkan dengan aman sebelum digunakan.');
+        }
       }
     }
 
