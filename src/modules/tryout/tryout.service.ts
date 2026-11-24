@@ -721,6 +721,10 @@ export class TryoutService {
       );
 
     if (!canSandbox && !questionsReleased) {
+      const schedule = await this.prisma.tryOut.findUnique({ where: { id: tryOutId }, select: { scheduledStart: true } });
+      if (schedule?.scheduledStart && new Date() < new Date(schedule.scheduledStart)) {
+        throw new BadRequestException({ code: 'TRYOUT_NOT_STARTED', message: 'Tryout belum dimulai. Ujian baru dapat dikerjakan sesuai jadwal.', scheduledStart: new Date(schedule.scheduledStart).toISOString() });
+      }
       throw new BadRequestException(
         'Soal ujian untuk Tryout ini belum diluncurkan oleh panitia. Silakan tunggu hingga jadwal peluncuran soal.',
       );
@@ -774,6 +778,10 @@ export class TryoutService {
       throw new ForbiddenException(
         'Kamu tidak memiliki akses ke tryout ini.',
       );
+    }
+
+    if (!canSandbox && currentAttempt?.status !== 'FINISHED' && currentAttempt?.tryOut?.scheduledStart && new Date() < new Date(currentAttempt.tryOut.scheduledStart)) {
+      throw new BadRequestException({ code: 'TRYOUT_NOT_STARTED', message: 'Tryout belum dimulai. Ujian baru dapat dikerjakan sesuai jadwal.', scheduledStart: new Date(currentAttempt.tryOut.scheduledStart).toISOString() });
     }
 
     // --- AUTO FINISH LOGIC ---

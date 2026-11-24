@@ -69,9 +69,30 @@ describe('ExamService', () => {
   });
 
   describe('startExam', () => {
+    it('reports the future start before checking question release and keeps the attempt unchanged', async () => {
+      prismaMock.$queryRaw.mockResolvedValueOnce([{ curationStatus: 'PUBLISHED', questionsReleased: false, scheduledStart: new Date('2999-01-01T00:00:00Z') }]).mockResolvedValueOnce([]);
+      prismaMock.tryOut.findUnique.mockResolvedValueOnce({ scheduledStart: new Date('2999-01-01T00:00:00Z'), scheduledEnd: null });
+      await expect(service.startExam('tryout-1', 'user-1')).rejects.toMatchObject({ response: { code: 'TRYOUT_NOT_STARTED' } });
+      expect(prismaMock.tryOutAttempt.update).not.toHaveBeenCalled();
+    });
+
+    it('does not start an empty tryout', async () => {
+      prismaMock.tryOutAttempt.findFirst.mockResolvedValue({ id: 'attempt-1', status: 'NOT_STARTED' });
+      prismaMock.subtest.findMany.mockResolvedValue([]);
+      await expect(service.startExam('tryout-1', 'user-1')).rejects.toMatchObject({ response: { code: 'TRYOUT_QUESTIONS_UNAVAILABLE' } });
+      expect(prismaMock.tryOutAttempt.update).not.toHaveBeenCalled();
+    });
+
+    it('does not resume a previously started attempt when its questions are missing', async () => {
+      prismaMock.tryOutAttempt.findFirst.mockResolvedValue({ id: 'attempt-1', status: 'IN_PROGRESS' });
+      prismaMock.subtest.findMany.mockResolvedValueOnce([]);
+      await expect(service.startExam('tryout-1', 'user-1')).rejects.toMatchObject({ response: { code: 'TRYOUT_QUESTIONS_UNAVAILABLE' } });
+      expect(prismaMock.tryOutAttempt.update).not.toHaveBeenCalled();
+    });
     it('should resume existing attempt if found', async () => {
       const mockAttempt = { id: 'attempt-1', status: 'IN_PROGRESS' };
 
+      prismaMock.subtest.findMany.mockResolvedValueOnce([{ order: 1, questions: [{ id: 'q-1' }] }]);
       prismaMock.tryOutAttempt.findFirst.mockResolvedValue(mockAttempt);
 
       const result = await service.startExam('tryout-1', 'user-1');

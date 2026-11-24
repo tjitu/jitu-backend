@@ -35,6 +35,12 @@ describe('TryoutService', () => {
     await expect(service.getSubtestQuestions('tryout-1', 1, 'user-1', 'attempt-1')).rejects.toThrow('Tryout belum dimulai');
   });
 
+  it('rejects a direct exam request before the start time', async () => {
+    prismaMock.subtest.findFirst.mockResolvedValue({ id: 'subtest-1', order: 1 });
+    prismaMock.tryOutAttempt.findUnique.mockResolvedValue({ id: 'attempt-1', userId: 'user-1', tryOutId: 'tryout-1', status: 'IN_PROGRESS', tryOut: { scheduledStart: new Date('2999-01-01T00:00:00Z') } });
+    await expect(service.getSubtestQuestions('tryout-1', 1, 'user-1', 'attempt-1')).rejects.toMatchObject({ response: { code: 'TRYOUT_NOT_STARTED' } });
+  });
+
   const mockTryoutsComplete = [
     {
       id: 'cku1tryout1',

@@ -103,12 +103,6 @@ export class ExamService implements OnModuleInit, OnModuleDestroy {
         sandboxToken,
       );
 
-    if (!canSandbox && !questionsReleased) {
-      throw new BadRequestException(
-        'Soal ujian untuk Tryout ini belum diluncurkan oleh panitia. Silakan tunggu hingga soal dibuka menjelang jadwal pelaksanaan.',
-      );
-    }
-
     if (curationStatus === 'PUBLISHED' && !canSandbox) {
       const tryout = await this.prisma.tryOut.findUnique({
         where: { id: tryOutId },
@@ -116,14 +110,18 @@ export class ExamService implements OnModuleInit, OnModuleDestroy {
       });
       const now = new Date();
       if (tryout?.scheduledStart && now < tryout.scheduledStart) {
-        throw new BadRequestException(
-          'Tryout belum dimulai. Ujian baru dapat dikerjakan sesuai jadwal.',
-        );
+        throw new BadRequestException({ code: 'TRYOUT_NOT_STARTED', message: 'Tryout belum dimulai. Ujian baru dapat dikerjakan sesuai jadwal.', scheduledStart: tryout.scheduledStart.toISOString() });
       }
       if (tryout?.scheduledEnd && now > tryout.scheduledEnd) {
         await this.autoGradeExpiredAttempts(userId, tryOutId);
         throw new BadRequestException('Masa pengerjaan tryout sudah berakhir.');
       }
+    }
+
+    if (!canSandbox && !questionsReleased) {
+      throw new BadRequestException(
+        'Soal ujian untuk Tryout ini belum diluncurkan oleh panitia. Silakan tunggu hingga soal dibuka menjelang jadwal pelaksanaan.',
+      );
     }
 
     // 1. Find ANY existing attempt for this user and tryout.
@@ -142,22 +140,20 @@ export class ExamService implements OnModuleInit, OnModuleDestroy {
     // 2. If an attempt already exists, handle based on status
     // If it's already in progress, check whether the active subtest has expired while disconnected.
     if (existingAttempt.status === 'IN_PROGRESS') {
+      const subtests = await this.prisma.subtest.findMany({
+        where: { tryOutId }, orderBy: { order: 'asc' },
+        include: { questions: { select: { id: true } } },
+      });
+      const readyIds = canSandbox ? null : await getReadyQuestionIdSet(this.prisma, tryOutId);
+      const populatedSubtests = subtests.filter((sub) => {
+        const questions = sub.questions ?? [];
+        return readyIds ? questions.some((question) => readyIds.has(question.id)) : questions.length > 0;
+      });
+      if (!populatedSubtests.length) {
+        throw new BadRequestException({ code: 'TRYOUT_QUESTIONS_UNAVAILABLE', message: 'Soal tryout belum tersedia. Silakan kembali lagi nanti.' });
+      }
       if (existingAttempt.subtestStartedAt) {
-        const subtests = await this.prisma.subtest.findMany({
-          where: { tryOutId },
-          orderBy: { order: 'asc' },
-          include: {
-            questions: { select: { id: true } },
-          },
-        });
-        const readyIds = canSandbox
-          ? null
-          : await getReadyQuestionIdSet(this.prisma, tryOutId);
-        const populatedSubtests = subtests.filter((sub) => {
-          const qs = sub.questions ?? [];
-          return readyIds ? qs.some((q) => readyIds.has(q.id)) : qs.length > 0;
-        });
-        const activeSubtests = populatedSubtests.length > 0 ? populatedSubtests : subtests;
+        const activeSubtests = populatedSubtests;
         const currentSubtest = activeSubtests.find(
           (s) => s.order === existingAttempt.currentSubtestOrder,
         );
@@ -192,6 +188,9 @@ export class ExamService implements OnModuleInit, OnModuleDestroy {
         orderBy: { order: 'asc' },
         include: { _count: { select: { questions: true } } },
       });
+      if (!tryoutSubtests.some((subtest) => subtest._count.questions > 0)) {
+        throw new BadRequestException({ code: 'TRYOUT_QUESTIONS_UNAVAILABLE', message: 'Soal tryout belum tersedia. Silakan kembali lagi nanti.' });
+      }
       let firstPopulatedOrder =
         tryoutSubtests.find((s) => s._count.questions > 0)?.order ?? 1;
 
@@ -208,6 +207,8 @@ export class ExamService implements OnModuleInit, OnModuleDestroy {
           );
           if (readySubtest) {
             firstPopulatedOrder = readySubtest.order;
+          } else {
+            throw new BadRequestException({ code: 'TRYOUT_QUESTIONS_UNAVAILABLE', message: 'Soal tryout belum tersedia. Silakan kembali lagi nanti.' });
           }
         }
       }
