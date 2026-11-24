@@ -292,13 +292,14 @@ describe('ExamService', () => {
       expect(result).toEqual({ id: 'attempt-1', totalScore: 750, subtestScores: [{ score: 720 }] });
     });
 
-    it('releases a completed private sandbox test only when its guarded update succeeds', async () => {
+    it('releases a sandbox result without changing the tryout schedule', async () => {
       prismaMock.tryOutAttempt.findUnique
         .mockResolvedValueOnce({ userId: 'user-1', tryOutId: 'sandbox-test-free', status: 'IN_PROGRESS', tryOut: { scheduledEnd: new Date('2099-01-01') } })
         .mockResolvedValueOnce({ id: 'attempt-1', totalScore: 750, subtestScores: [{ score: 720 }] });
       prismaMock.userAnswer.findMany.mockResolvedValue([]);
-      prismaMock.$executeRaw.mockResolvedValueOnce(1);
+      prismaMock.$queryRaw.mockResolvedValueOnce([{ id: 'user-1' }]);
       expect(await service.finishExam('attempt-1', 'user-1')).toEqual({ id: 'attempt-1', totalScore: 750, subtestScores: [{ score: 720 }] });
+      expect(prismaMock.$executeRaw).not.toHaveBeenCalled();
     });
 
     it('does not finish another user\'s attempt', async () => {

@@ -140,7 +140,7 @@ export class TryoutService {
 
     // Cek Status Waktu (Sandbox testers can test unpublished tryouts regardless of future schedule dates)
     // Siswa dapat mendaftar sebelum dan selama tryout berlangsung; pendaftaran ditutup hanya jika jadwal sudah berakhir
-    if (curationStatus === 'PUBLISHED') {
+    if (curationStatus === 'PUBLISHED' && !(await getSandboxUserIdSet(this.prisma)).has(userId)) {
       const now = new Date();
       if (tryout.scheduledEnd && now > tryout.scheduledEnd) {
         throw new BadRequestException('Masa pengerjaan tryout sudah berakhir.');
@@ -295,9 +295,10 @@ export class TryoutService {
     if (userId) {
       await this.examService?.autoGradeExpiredAttempts?.(userId).catch(() => 0);
     }
-    const [canSandbox, previewTryoutId] = await Promise.all([
+    const [canSandbox, previewTryoutId, sandboxUserIds] = await Promise.all([
       canAccessTryoutSandbox(this.prisma, userId),
       getSandboxPreviewTryoutId(this.prisma, sandboxToken),
+      getSandboxUserIdSet(this.prisma),
     ]);
 
     const tryouts = await this.prisma.tryOut.findMany({
@@ -307,7 +308,7 @@ export class TryoutService {
           ? { OR: [{ isPublic: true }, { id: previewTryoutId }] }
           : { isPublic: true },
       include: {
-        _count: { select: { attempts: true } },
+        _count: { select: { attempts: { where: { userId: { notIn: [...sandboxUserIds] } } } } },
         subtests: {
           select: { order: true, durationMinutes: true },
           orderBy: { order: 'asc' },
@@ -393,6 +394,7 @@ export class TryoutService {
       await this.examService?.autoGradeExpiredAttempts?.(userId, id);
     }
 
+    const sandboxUserIds = await getSandboxUserIdSet(this.prisma);
     const tryout = await this.prisma.tryOut.findUnique({
       where: { id },
       include: {
@@ -413,7 +415,7 @@ export class TryoutService {
               orderBy: { startedAt: 'desc' },
             }
           : false,
-        _count: { select: { attempts: true } },
+        _count: { select: { attempts: { where: { userId: { notIn: [...sandboxUserIds] } } } } },
         unlockedSolutions: userId ? { where: { userId } } : false,
       },
     });
@@ -577,7 +579,7 @@ export class TryoutService {
       isUserPremium ||
       (tryout.unlockedSolutions?.length ?? 0) > 0;
 
-    const resultsAvailable = areTryoutResultsAvailable(tryout.scheduledEnd);
+    const resultsAvailable = areTryoutResultsAvailable(tryout.scheduledEnd) || Boolean(userId && latestFinishedAttemptId && sandboxUserIds.has(userId));
     const dto = this.mapTryoutToDto(
       tryout,
       answeredQuestionIds,
@@ -663,7 +665,7 @@ export class TryoutService {
     ]);
 
     const allFinishedAttempts = rawFinishedAttempts.filter(
-      (attempt) => !sandboxUserIds.has(attempt.userId) || attempt.userId === userId,
+      (attempt) => !sandboxUserIds.has(attempt.userId),
     );
 
     // 2. Filter for attempts that are eligible for the official leaderboard.
@@ -806,7 +808,7 @@ export class TryoutService {
       );
 
       const scheduleEnded =
-        curationStatus === 'PUBLISHED' &&
+        curationStatus === 'PUBLISHED' && !(await getSandboxUserIdSet(this.prisma)).has(userId) &&
         currentAttempt.tryOut.scheduledEnd &&
         now > currentAttempt.tryOut.scheduledEnd;
 

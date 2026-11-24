@@ -442,7 +442,7 @@ export class ExamService implements OnModuleInit, OnModuleDestroy {
         throw new BadRequestException('Ujian belum dimulai.');
       }
 
-      if (attempt.tryOut?.scheduledEnd && Date.now() > new Date(attempt.tryOut.scheduledEnd).getTime() + 5000) {
+      if (attempt.tryOut?.scheduledEnd && Date.now() > new Date(attempt.tryOut.scheduledEnd).getTime() + 5000 && !(await getSandboxUserIdSet(this.prisma)).has(userId)) {
         throw new BadRequestException('Masa pengerjaan tryout sudah berakhir.');
       }
 
@@ -626,8 +626,9 @@ export class ExamService implements OnModuleInit, OnModuleDestroy {
     if (attempt.userId !== userId) {
       throw new ForbiddenException('Kamu tidak memiliki akses ke sesi tryout ini.');
     }
+    const isSandbox = (await getSandboxUserIdSet(this.prisma)).has(userId);
     if (attempt.status === 'FINISHED') {
-      return this.getFinishedExamResult(attemptId, attempt.tryOut?.scheduledEnd);
+      return this.getFinishedExamResult(attemptId, isSandbox ? new Date(0) : attempt.tryOut?.scheduledEnd);
     }
     if (attempt.status !== 'IN_PROGRESS') {
       throw new BadRequestException('Attempt tidak aktif atau sudah selesai.');
@@ -662,17 +663,7 @@ export class ExamService implements OnModuleInit, OnModuleDestroy {
     // 3. Calculate 3PL EAP IRT scores (per subtest and composite overall score) & persist
     await this.irtService.calculateAndSaveAttemptScore(attemptId, userId);
 
-    if (['sandbox-test-free', 'sandbox-test-one-coin'].includes(attempt.tryOutId)) {
-      const released = await this.prisma.$executeRaw`
-        UPDATE "TryOut" SET "scheduledEnd" = NOW()
-        WHERE id = ${attempt.tryOutId} AND "isPublic" = false AND curation_status = 'QC_SANDBOX'
-          AND EXISTS (SELECT 1 FROM "user" WHERE id = ${userId} AND COALESCE("isSandbox", false) = true)
-          AND EXISTS (SELECT 1 FROM "TryOutAttempt" WHERE id = ${attemptId} AND "userId" = ${userId} AND status = 'FINISHED')
-      `;
-      if (released > 0) return this.getFinishedExamResult(attemptId, new Date(0));
-    }
-
-    return this.getFinishedExamResult(attemptId, attempt.tryOut?.scheduledEnd);
+    return this.getFinishedExamResult(attemptId, isSandbox ? new Date(0) : attempt.tryOut?.scheduledEnd);
   }
 
   private async getFinishedExamResult(attemptId: string, scheduledEnd: Date | null | undefined) {

@@ -216,6 +216,7 @@ describe('TryoutService', () => {
     it('only exposes the unpublished tryout scoped to a preview token', async () => {
       prismaMock.$queryRaw
         .mockResolvedValueOnce([{ tryoutId: 'cku1tryout1' }])
+        .mockResolvedValueOnce([])
         .mockResolvedValueOnce([
           { id: 'cku1tryout1', curationStatus: 'QC_SANDBOX' },
           { id: 'cku1tryout2', curationStatus: 'DRAFT' },
@@ -239,6 +240,7 @@ describe('TryoutService', () => {
       const targetTryout = mockTryoutsComplete[0];
       prismaMock.tryOut.findUnique.mockResolvedValue(targetTryout);
       prismaMock.tryOutAttempt.findFirst.mockResolvedValue(null);
+      prismaMock.$queryRaw.mockResolvedValueOnce([]);
 
       const result = await service.getTryoutById('cku1tryout1', 'user123');
 
@@ -260,7 +262,7 @@ describe('TryoutService', () => {
             },
             orderBy: { startedAt: 'desc' },
           },
-          _count: { select: { attempts: true } },
+          _count: { select: { attempts: { where: { userId: { notIn: [] } } } } },
           unlockedSolutions: { where: { userId: 'user123' } },
         },
       });
