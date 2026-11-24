@@ -575,10 +575,11 @@ export class TryoutService {
       (tryout.unlockedSolutions?.length ?? 0) > 0;
 
     const resultsAvailable = areTryoutResultsAvailable(tryout.scheduledEnd) || Boolean(userId && latestFinishedAttemptId && sandboxUserIds.has(userId));
+    const showAnswerCounts = hasResultAccess || !resultsAvailable;
     const dto = this.mapTryoutToDto(
       tryout,
       answeredQuestionIds,
-      hasResultAccess ? userAnswersMap : undefined,
+      showAnswerCounts ? userAnswersMap : undefined,
       hasResultAccess && resultsAvailable ? subtestScoresMap : undefined,
     );
     if (isUserPremium) {
@@ -597,8 +598,8 @@ export class TryoutService {
       resumeUrl,
       latestScore: hasResultAccess && resultsAvailable ? latestScore : null,
       resultsAvailable,
-      correctCount: hasResultAccess ? correctCount : 0,
-      wrongCount: hasResultAccess ? wrongCount : 0,
+      correctCount: showAnswerCounts ? correctCount : 0,
+      wrongCount: showAnswerCounts ? wrongCount : 0,
       emptyCount: hasResultAccess ? emptyCount : 0,
       curationStatus,
       questionsReleased,
@@ -829,6 +830,7 @@ export class TryoutService {
       currentAttempt = await this.prisma.tryOutAttempt.findFirst({
         where: { userId, tryOutId, status: 'FINISHED' },
         orderBy: { finishedAt: 'desc' },
+        include: { tryOut: { select: { scheduledEnd: true } } },
       });
     }
 
@@ -839,6 +841,13 @@ export class TryoutService {
     }
 
     const isReviewMode = currentAttempt.status === 'FINISHED';
+    if (isReviewMode && !areTryoutResultsAvailable(currentAttempt.tryOut?.scheduledEnd)
+      && !(await getSandboxUserIdSet(this.prisma)).has(userId)) {
+      throw new ForbiddenException({
+        code: 'TRYOUT_REVIEW_NOT_RELEASED',
+        message: 'Pembahasan tersedia setelah periode tryout berakhir.',
+      });
+    }
 
     // [SECURITY] Cegah skip subtest atau akses subtest masa lalu/depan
     // Standar UTBK: User HANYA boleh ada di subtes yang sedang aktif.

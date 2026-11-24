@@ -18,6 +18,7 @@ const prismaMock = {
     findUnique: jest.fn(),
   },
   subtest: { findFirst: jest.fn() },
+  question: { findMany: jest.fn() },
   user: {
     findUnique: jest.fn().mockResolvedValue(null),
   },
@@ -28,6 +29,30 @@ const prismaMock = {
 
 describe('TryoutService', () => {
   let service: TryoutService;
+
+  it.each([new Date('2999-01-01'), null])('withholds finished exam questions before release (%s)', async scheduledEnd => {
+    prismaMock.subtest.findFirst.mockResolvedValue({ id: 'sub', order: 1 });
+    prismaMock.tryOutAttempt.findUnique.mockResolvedValue({
+      id: 'attempt', userId: 'student', tryOutId: 'tryout', status: 'FINISHED', tryOut: { scheduledEnd },
+    });
+    await expect(service.getSubtestQuestions('tryout', 1, 'student', 'attempt'))
+      .rejects.toMatchObject({ response: { code: 'TRYOUT_REVIEW_NOT_RELEASED' } });
+    expect(prismaMock.question.findMany).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['student', new Date('2020-01-01')],
+    ['sandbox', new Date('2999-01-01')],
+  ] as const)('allows released review or sandbox QC for %s', async (userId, scheduledEnd) => {
+    prismaMock.$queryRaw.mockResolvedValue([{ id: 'sandbox', curationStatus: 'PUBLISHED', questionsReleased: true }]);
+    prismaMock.subtest.findFirst.mockResolvedValue({ id: 'sub', order: 1, durationMinutes: 30 });
+    prismaMock.tryOutAttempt.findUnique.mockResolvedValue({
+      id: 'attempt', tryOutId: 'tryout', userId, status: 'FINISHED', startedAt: new Date(), tryOut: { scheduledEnd },
+    });
+    prismaMock.tryOut.findUnique.mockResolvedValue({ solutionPrice: 0, subtests: [] });
+    prismaMock.question.findMany.mockResolvedValue([]);
+    await expect(service.getSubtestQuestions('tryout', 1, userId, 'attempt')).resolves.toMatchObject({ isReviewMode: true });
+  });
 
   it('rejects direct question and review access for a reset attempt', async () => {
     prismaMock.subtest.findFirst.mockResolvedValue({ id: 'subtest-1', order: 1 });
