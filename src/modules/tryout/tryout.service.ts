@@ -22,7 +22,6 @@ import {
   canAccessTryoutSandbox,
   getReadyQuestionIdSet,
   getSandboxUserIdSet,
-  getSandboxPreviewTryoutId,
   getTryoutCurationMap,
   resolveTryoutAccess,
 } from './tryout-curation.helper';
@@ -295,18 +294,15 @@ export class TryoutService {
     if (userId) {
       await this.examService?.autoGradeExpiredAttempts?.(userId).catch(() => 0);
     }
-    const [canSandbox, previewTryoutId, sandboxUserIds] = await Promise.all([
+    const [canSandbox, sandboxUserIds] = await Promise.all([
       canAccessTryoutSandbox(this.prisma, userId),
-      getSandboxPreviewTryoutId(this.prisma, sandboxToken),
       getSandboxUserIdSet(this.prisma),
     ]);
 
     const tryouts = await this.prisma.tryOut.findMany({
       where: canSandbox
         ? undefined
-        : previewTryoutId
-          ? { OR: [{ isPublic: true }, { id: previewTryoutId }] }
-          : { isPublic: true },
+        : { isPublic: true },
       include: {
         _count: { select: { attempts: { where: { userId: { notIn: [...sandboxUserIds] } } } } },
         subtests: {
@@ -333,7 +329,6 @@ export class TryoutService {
       const status = curationMap.get(t.id) ?? 'DRAFT';
       if (status === 'PUBLISHED' && t.isPublic) return true;
       if (canSandbox) return true;
-      if (previewTryoutId === t.id && status !== 'PUBLISHED') return true;
       return false;
     });
 

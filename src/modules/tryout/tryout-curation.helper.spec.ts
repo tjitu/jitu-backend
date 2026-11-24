@@ -27,15 +27,20 @@ describe('tryout-curation.helper', () => {
     ).resolves.toBe('tryout-1');
   });
 
-  it('allows a preview token only for its matching tryout', async () => {
-    prisma.$queryRaw.mockResolvedValue([{ tryoutId: 'tryout-1' }]);
+  it('does not grant QC access to an ordinary user with a preview token', async () => {
+    prisma.$queryRaw.mockResolvedValue([{ isSandbox: false, role: 'USER' }]);
 
     await expect(
-      canAccessTryoutSandbox(prisma, undefined, 'tryout-1', 'a'.repeat(64)),
-    ).resolves.toBe(true);
+      canAccessTryoutSandbox(prisma, 'ordinary', 'tryout-1', 'a'.repeat(64)),
+    ).resolves.toBe(false);
     await expect(
       canAccessTryoutSandbox(prisma, undefined, 'tryout-2', 'a'.repeat(64)),
     ).resolves.toBe(false);
+  });
+
+  it.each([{ isSandbox: true, role: 'USER' }, { isSandbox: false, role: 'ADMIN' }])('permits sandbox and admin accounts', async (user) => {
+    prisma.$queryRaw.mockResolvedValue([user]);
+    await expect(canAccessTryoutSandbox(prisma, 'authorized', 'tryout-1')).resolves.toBe(true);
   });
 
   it('fails closed when the curation query fails for reasons other than a missing legacy column', async () => {

@@ -221,9 +221,8 @@ describe('TryoutService', () => {
       });
     });
 
-    it('only exposes the unpublished tryout scoped to a preview token', async () => {
+    it('does not expose unpublished tryouts to a token without sandbox access', async () => {
       prismaMock.$queryRaw
-        .mockResolvedValueOnce([{ tryoutId: 'cku1tryout1' }])
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([
           { id: 'cku1tryout1', curationStatus: 'QC_SANDBOX' },
@@ -233,10 +232,10 @@ describe('TryoutService', () => {
 
       const result = await service.getTryouts(undefined, 'a'.repeat(64));
 
-      expect(result.map((tryout) => tryout.id)).toEqual(['cku1tryout1']);
+      expect(result.map((tryout) => tryout.id)).toEqual([]);
       expect(prismaMock.tryOut.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { OR: [{ isPublic: true }, { id: 'cku1tryout1' }] },
+          where: { isPublic: true },
         }),
       );
     });

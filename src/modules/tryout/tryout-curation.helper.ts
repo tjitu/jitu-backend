@@ -72,12 +72,12 @@ export async function getTryoutCurationMap(
   return map;
 }
 
-/** Checks whether the current user is a sandbox/admin QA tester or holds a valid preview token. */
+/** Checks whether the authenticated user is a sandbox or admin QA tester. */
 export async function canAccessTryoutSandbox(
   prisma: PrismaService,
   userId?: string | null,
-  tryoutId?: string | null,
-  sandboxToken?: string | null,
+  _tryoutId?: string | null,
+  _sandboxToken?: string | null,
 ): Promise<boolean> {
   if (userId) {
     try {
@@ -98,9 +98,7 @@ export async function canAccessTryoutSandbox(
     }
   }
 
-  if (!tryoutId) return false;
-
-  return (await getSandboxPreviewTryoutId(prisma, sandboxToken)) === tryoutId;
+  return false;
 }
 
 /** Returns the single tryout a valid preview token is scoped to. */
