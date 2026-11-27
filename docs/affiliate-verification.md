@@ -1,5 +1,9 @@
 # Affiliate verification results
 
+Subsequent runtime repair: the configured databases now have the additive feature
+schema. Team Backend's `docs/affiliate-runtime-migrations-20261127.md` records that
+operation; the verification snapshot below predates it.
+
 Verified locally on 27 November 2026. No production migration or live financial
 transaction was executed.
 

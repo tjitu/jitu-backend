@@ -1,5 +1,13 @@
 # Affiliate program: implementation and release
 
+Runtime update, 27 November 2026: the configured databases have now received the
+five Main feature SQL migrations and the Team role/username migration to repair
+the running dashboard's missing-column error. See Team Backend's
+`docs/affiliate-runtime-migrations-20261127.md`. Existing Prisma history is not
+baselined; do not blindly rerun migration deployment against these databases.
+The "not run against production" statements below describe the earlier isolated
+implementation verification, before this subsequent runtime repair.
+
 ## Architecture
 
 Affiliate accounts use the existing Team Supabase session and `TeamMember` role.
