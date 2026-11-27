@@ -1,0 +1,25 @@
+# Affiliate change manifest
+
+- `docs/affiliate-files.md`
+- `docs/affiliate-program.md`
+- `docs/affiliate-verification.md`
+- `package.json`
+- `prisma.config.ts`
+- `prisma/affiliate.prisma`
+- `prisma/migrations/20261127000100_affiliate_tables/migration.sql`
+- `prisma/migrations/20261127000200_affiliate_policy/migration.sql`
+- `prisma/migrations/20261127000300_affiliate_checkout/migration.sql`
+- `prisma/migrations/20261127000400_affiliate_administration/migration.sql`
+- `prisma/migrations/20261127000500_affiliate_integrity/migration.sql`
+- `prisma/schema.prisma`
+- `REPO_MAP.md`
+- `src/modules/shop/services/affiliate-midtrans-expiry.ts`
+- `src/modules/shop/services/affiliate-pricing.service.spec.ts`
+- `src/modules/shop/services/affiliate-pricing.service.ts`
+- `src/modules/shop/services/midtrans.service.ts`
+- `src/modules/shop/shop.module.ts`
+- `src/modules/shop/shop.service.spec.ts`
+- `src/modules/shop/shop.service.ts`
+- `test/affiliate-concurrency.test.cjs`
+- `test/affiliate-database.test.cjs`
+- `test/affiliate-fixture.cjs`

@@ -244,6 +244,8 @@ model Payment {
   voucherCode    String?
   discountAmount Int           @default(0)
   originalAmount Int?
+  affiliateCheckoutId String? @unique
+  affiliateCheckout AffiliateCheckout? @relation(fields: [affiliateCheckoutId], references: [id], onDelete: Restrict)
 
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
@@ -265,11 +267,16 @@ model Voucher {
   expiresAt       DateTime?
   description     String?
   referrerName    String?
+  affiliateId     String?
+  affiliateAssignedBy String?
+  affiliate       AffiliateProfile? @relation(fields: [affiliateId], references: [id], onDelete: Restrict)
+  affiliateCheckouts AffiliateCheckout[]
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
   payments        Payment[]
   usages          VoucherUsage[]
+  @@index([affiliateId])
 }
 
 model VoucherUsage {

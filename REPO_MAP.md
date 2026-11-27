@@ -41,6 +41,10 @@ jitu-backend/
 
 ## 2. Key Architecture Patterns
 
+* **Affiliate finance**: `prisma/affiliate.prisma` contains Main DB profiles, terms, quotas, boost activations, agreements, acceptance snapshots, checkout snapshots, journal, payouts and audit. `prisma.config.ts` loads the `prisma/` schema directory.
+* **Shared affiliate pricing**: additive `20261127*` migrations define `affiliate_quote`, `affiliate_rates`, atomic activation/allocation, immutable payment attribution, confirmation triggers and cumulative refund adjustments. Nest and student Next checkout use the same database rules.
+* **Gateway adapter**: `modules/shop/services/affiliate-pricing.service.ts` validates affiliate quotes and verified refunds; `affiliate-midtrans-expiry.ts` derives gateway expiry from checkout timing. `docs/affiliate-program.md` is the migration/release runbook; `test/affiliate-*.test.cjs` covers PostgreSQL rules and races.
+
 * **ORM**: Prisma 7 with custom output path at `generated/prisma`. Use `PrismaService` injection.
 * **Database**: PostgreSQL hosted on Supabase (`DATABASE_URL` pooler).
 * **Payment Webhooks**: Midtrans notifications handled inside `shop/` with signature validation.

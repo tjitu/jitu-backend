@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma.service';
 import { ConfigService } from '@nestjs/config';
 import { MidtransService } from './services/midtrans.service'; // Import MidtransService
 import { BadRequestException } from '@nestjs/common';
+import { AffiliatePricingService } from './services/affiliate-pricing.service';
 
 // --- MOCK CONSTANTS ---
 const MOCK_USER_ID = 'user-123';
@@ -21,6 +22,7 @@ describe('ShopService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ShopService,
+        { provide: AffiliatePricingService,useValue: { quote: jest.fn().mockResolvedValue(null),refund: jest.fn().mockResolvedValue(false) } },
         {
           provide: PrismaService,
           useValue: {

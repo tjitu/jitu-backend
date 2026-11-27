@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { affiliateGatewayExpiry, type CheckoutTiming } from './affiliate-midtrans-expiry';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'node:crypto';
 import { crc16ccitt } from 'crc';
@@ -65,12 +66,14 @@ export class MidtransService {
     grossAmount: number,
     itemDetails?: Array<{ id: string; price: number; quantity: number; name: string }>,
     customerDetails?: { first_name?: string; email?: string },
+    checkoutTiming?: CheckoutTiming,
   ): Promise<{ token: string; redirect_url: string }> {
     const snapUrl = this.isProduction
       ? 'https://app.midtrans.com/snap/v1/transactions'
       : 'https://app.sandbox.midtrans.com/snap/v1/transactions';
 
     const payload = {
+      expiry: affiliateGatewayExpiry(checkoutTiming).expiry,
       transaction_details: {
         order_id: orderId,
         gross_amount: Math.round(grossAmount),
@@ -106,8 +109,9 @@ export class MidtransService {
     grossAmount: number,
     itemDetails?: Array<{ id: string; price: number; quantity: number; name: string }>,
     customerDetails?: { first_name?: string; email?: string },
+    checkoutTiming?: CheckoutTiming,
   ): Promise<{ token: string; redirect_url: string; qr_string?: string; qr_url?: string; expiry_time: string }> {
-    const snapResult = await this.createSnapTransaction(orderId, grossAmount, itemDetails, customerDetails);
+    const snapResult = await this.createSnapTransaction(orderId, grossAmount, itemDetails, customerDetails,checkoutTiming);
 
     const chargeUrl = this.isProduction
       ? `https://app.midtrans.com/snap/v2/transactions/${snapResult.token}/charge`

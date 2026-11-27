@@ -1,0 +1,166 @@
+// Financial records live in Main DB. teamMemberId/userId are external Team DB
+// identities: cross-database foreign keys are not supported by PostgreSQL.
+model AffiliateProfile {
+  id           String @id
+  userId       String @unique
+  name         String
+  identifier   String
+  isActive     Boolean @default(true)
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+  terms        AffiliateTerms[]
+  vouchers     Voucher[]
+  quotas       AffiliateQuota[]
+  boosts       AffiliateBoost[]
+  checkouts    AffiliateCheckout[]
+  acceptances  AffiliateAcceptance[]
+  ledger       AffiliateLedger[]
+  payouts      AffiliatePayout[]
+}
+
+model AffiliateDefaults {
+  id     String @id @default("default")
+  config Json
+}
+
+model AffiliateTerms {
+  id          String @id @default(uuid())
+  affiliateId String
+  config      Json
+  effectiveAt DateTime @db.Timestamptz(3)
+  agreementId String?
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  affiliate   AffiliateProfile @relation(fields: [affiliateId], references: [id], onDelete: Restrict)
+  agreement   AffiliateAgreement? @relation(fields: [agreementId], references: [id], onDelete: Restrict)
+  @@index([affiliateId, effectiveAt])
+  @@index([agreementId])
+}
+
+model AffiliateQuota {
+  id          String @id @default(uuid())
+  affiliateId String
+  month       String
+  type        String
+  allocated   Int
+  bonus       Int @default(0)
+  used        Int @default(0)
+  affiliate   AffiliateProfile @relation(fields: [affiliateId], references: [id], onDelete: Restrict)
+  boosts      AffiliateBoost[]
+  @@unique([affiliateId, month, type])
+}
+
+model AffiliateBoost {
+  id           String @id @default(uuid())
+  affiliateId  String
+  quotaId      String
+  type         String
+  group        String
+  baseRate     Int
+  additional   Int
+  activatedAt  DateTime @default(now()) @db.Timestamptz(3)
+  expiresAt    DateTime @db.Timestamptz(3)
+  maxTransactions Int?
+  requestKey   String
+  affiliate    AffiliateProfile @relation(fields: [affiliateId], references: [id], onDelete: Restrict)
+  quota        AffiliateQuota @relation(fields: [quotaId], references: [id], onDelete: Restrict)
+  @@unique([affiliateId, requestKey])
+  @@index([affiliateId, group, expiresAt])
+  @@index([quotaId])
+}
+
+model AffiliateAgreement {
+  id          String @id @default(uuid())
+  version     Int @unique
+  title       String
+  content     String
+  party       String @default("")
+  summary     String @default("")
+  status      String @default("DRAFT")
+  effectiveAt DateTime? @db.Timestamptz(3)
+  requiresAcceptance Boolean @default(true)
+  publishedAt DateTime? @db.Timestamptz(3)
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  acceptances AffiliateAcceptance[]
+  terms       AffiliateTerms[]
+}
+
+model AffiliateAcceptance {
+  id          String @id @default(uuid())
+  affiliateId String
+  agreementId String
+  version     Int
+  snapshot    String
+  identity    Json
+  contentHash String
+  status      String @default("ACCEPTED")
+  acceptedAt  DateTime @default(now()) @db.Timestamptz(3)
+  affiliate   AffiliateProfile @relation(fields: [affiliateId], references: [id], onDelete: Restrict)
+  agreement   AffiliateAgreement @relation(fields: [agreementId], references: [id], onDelete: Restrict)
+  @@unique([affiliateId, agreementId])
+  @@index([agreementId])
+}
+
+model AffiliateCheckout {
+  id             String @id
+  affiliateId    String
+  voucherId      String
+  code           String
+  originalAmount Int
+  baseDiscount   Int
+  baseCommission Int
+  discountRate   Int
+  commissionRate Int
+  boostIds       String[]
+  discountAmount Int
+  paidAmount     Int
+  commission     Int
+  expiresAt      DateTime @db.Timestamptz(3)
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  affiliate      AffiliateProfile @relation(fields: [affiliateId], references: [id], onDelete: Restrict)
+  voucher        Voucher @relation(fields: [voucherId], references: [id], onDelete: Restrict)
+  payment        Payment?
+  ledger         AffiliateLedger[]
+  @@index([affiliateId, createdAt])
+  @@index([boostIds], type: Gin)
+  @@index([voucherId])
+}
+
+model AffiliateLedger {
+  id          String @id @default(uuid())
+  affiliateId String
+  checkoutId  String
+  eventKey    String @unique
+  kind        String
+  amount      Int
+  refundTotal Int @default(0)
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  affiliate   AffiliateProfile @relation(fields: [affiliateId], references: [id], onDelete: Restrict)
+  checkout    AffiliateCheckout @relation(fields: [checkoutId], references: [id], onDelete: Restrict)
+  @@index([affiliateId, createdAt])
+  @@index([checkoutId])
+}
+
+model AffiliatePayout {
+  // Entries are immutable except PENDING -> PAID/CANCELLED transitions.
+  id          String @id @default(uuid())
+  affiliateId String
+  amount      Int
+  paidAt      DateTime @db.Timestamptz(3)
+  reference   String @unique
+  requestKey  String @unique
+  status      String @default("PAID")
+  notes       String @default("")
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  affiliate   AffiliateProfile @relation(fields: [affiliateId], references: [id], onDelete: Restrict)
+  @@index([affiliateId, paidAt])
+}
+
+model AffiliateAudit {
+  id        String @id @default(uuid())
+  actorId   String
+  event     String
+  entityId  String
+  before    Json?
+  after     Json?
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  @@index([entityId, createdAt])
+}

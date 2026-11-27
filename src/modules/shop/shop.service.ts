@@ -9,6 +9,8 @@ import type { Prisma } from '../../../generated/prisma/client';
 import { ConfigService } from '@nestjs/config';
 import { PaymentStatus } from '../../../generated/prisma/client';
 import { MidtransService } from './services/midtrans.service';
+import { AffiliatePricingService } from './services/affiliate-pricing.service';
+import { randomUUID } from 'node:crypto';
 import type {
   EWalletPaymentResponse,
   MidtransNotificationDto,
@@ -23,6 +25,7 @@ export class ShopService {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly midtransService: MidtransService,
+    private readonly affiliatePricing: AffiliatePricingService,
   ) {}
 
   private mergePaymentMetadata(
@@ -346,19 +349,21 @@ export class ShopService {
     }
 
     // 3. Calculate discount
+    const affiliate = await this.affiliatePricing.quote(voucher.id,effectivePrice);
     let discountAmount = Math.round(
       (effectivePrice * voucher.discountPercent) / 100,
     );
     if (voucher.maxDiscount && discountAmount > voucher.maxDiscount) {
       discountAmount = voucher.maxDiscount;
     }
-    const finalPrice = Math.max(0, effectivePrice - discountAmount);
+    discountAmount = affiliate?.discountAmount ?? discountAmount;
+    const finalPrice = affiliate?.paidAmount ?? Math.max(0, effectivePrice - discountAmount);
 
     return {
       valid: true,
       voucherId: voucher.id,
       code: voucher.code,
-      discountPercent: voucher.discountPercent,
+      discountPercent: affiliate ? affiliate.discountRate / 100 : voucher.discountPercent,
       discountAmount,
       originalPrice: effectivePrice,
       finalPrice,
@@ -430,6 +435,8 @@ export class ShopService {
       finalPrice = vResult.finalPrice;
     }
 
+    const affiliate = voucherId ? await this.affiliatePricing.quote(voucherId,packageEffectivePrice,randomUUID()) : null;
+    finalPrice = affiliate?.paidAmount ?? finalPrice;
     const discountAmount = Math.max(0, selectedPackage.price - finalPrice);
 
     // Generate unique order ID
@@ -446,8 +453,9 @@ export class ShopService {
         discountAmount,
         voucherId,
         voucherCode: appliedVoucherCode,
+        affiliateCheckoutId: affiliate?.id ?? null,
         tokenAmount: selectedPackage.tokenAmount,
-        status: finalPrice === 0 ? PaymentStatus.CONFIRMED : PaymentStatus.PENDING,
+        status: PaymentStatus.PENDING,
         paymentMethod: finalPrice === 0 ? 'FREE_VOUCHER' : 'GOPAY',
       },
     });
@@ -492,6 +500,7 @@ export class ShopService {
           first_name: user?.name || user?.email?.split('@')[0] || 'Siswa Jitu',
           email: user?.email || undefined,
         },
+        affiliate ? { createdAt: affiliate.createdAt,expiresAt: affiliate.expiresAt } : undefined,
       );
 
       // 3. Update payment with Midtrans Snap token and metadata
@@ -796,6 +805,9 @@ export class ShopService {
           '',
         midtransStatus.fraud_status || notification.fraud_status,
       );
+      if (await this.affiliatePricing.refund(payment.orderId,midtransStatus)) {
+        return { success: true, message: 'Verified refund commission adjustment recorded' };
+      }
       this.logger.log(
         `Status mapping for ${notification.order_id}: ${midtransStatus.transaction_status} -> ${newStatus}`,
       );
@@ -812,6 +824,7 @@ export class ShopService {
           : {};
       const metadata = {
         ...baseMetadata,
+        affiliate_terminal: ['cancel','expire','deny','failure'].includes(midtransStatus.transaction_status ?? ''),
         last_status_check: JSON.parse(
           JSON.stringify(midtransStatus),
         ) as Prisma.InputJsonValue,
@@ -986,14 +999,12 @@ export class ShopService {
       throw new BadRequestException('Payment not found in our system.');
     }
 
-    // 2. If already confirmed, just return it
-    if (payment.status === PaymentStatus.CONFIRMED) {
-      return payment;
-    }
-
     // 3. Get latest status from Midtrans
     const midtransStatus =
       await this.midtransService.getTransactionStatus(orderId);
+    if (Number(midtransStatus.gross_amount)!==payment.amount) throw new BadRequestException('Verified payment amount does not match the order.');
+    if (await this.affiliatePricing.refund(orderId,midtransStatus)) return payment;
+    if (payment.status === PaymentStatus.CONFIRMED) return payment;
 
     // 4. Map the status
     const newStatus = this.midtransService.mapTransactionStatus(
@@ -1004,6 +1015,11 @@ export class ShopService {
     // 5. If confirmed on Midtrans, finalize it locally
     if (newStatus === PaymentStatus.CONFIRMED) {
       return this.setPaid(payment.id);
+    }
+    if (['cancel','expire','deny','failure'].includes(midtransStatus.transaction_status ?? '')) {
+      const metadata = payment.metadata && typeof payment.metadata==='object' && !Array.isArray(payment.metadata) ? payment.metadata : {};
+      await this.prisma.payment.updateMany({ where: { id: payment.id,status: { not: PaymentStatus.CONFIRMED } },
+        data: { status: PaymentStatus.CANCELLED,metadata: { ...metadata,affiliate_terminal: true } } });
     }
 
     // 6. Otherwise, just return the current local state
