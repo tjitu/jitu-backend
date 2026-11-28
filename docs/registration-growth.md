@@ -1,50 +1,46 @@
-# Registration & Growth
+# Free registration & growth
 
-Free registrations can require participant social declarations followed by manual Team review. Verification is separate from payment and attempt status. Pending/rejected submissions create no exam attempt; approval creates one `NOT_STARTED` attempt and existing scheduling/question-release checks still apply. Existing registrations are grandfathered. Disabled growth and paid registration preserve the previous flow.
+Free registration now always starts with WhatsApp number, contact email and school, followed by Instagram username and social declarations. The campaign URL determines the requirements automatically:
 
-## Database and rollout
+- Empty campaign URL: follow @jituptn and join Komunitas JITU are required.
+- Campaign URL present: follow @jituptn plus the configured like/tag/Story/mention requirements.
 
-The Main database owns `TryOut.growthConfig/growthVersion/growthUpdatedBy`, `TryoutRegistrationVerification`, `TryoutVerificationHistory`, and `TryoutGrowthEvent`. Schema declarations are in `prisma/schema.prisma` and `prisma/growth.prisma`.
+Follow and Instagram username are mandatory in both modes, including when manual review is disabled. The UI says ?Ceklis jika sudah.? Community mode reminds participants to use the same phone number as their bio. Existing paid registrations and sandbox preview retain their previous behavior; already registered attempts are grandfathered.
 
-Apply these additive SQL migrations in order before deploying any of the four applications:
+## Data and invariants
 
-1. `20261128000100_registration_growth`: configuration, private records, validation, audit.
-2. `20261128000200_growth_registration`: own state, idempotent submit/resubmit, admission, access gate, paid reconciliation.
-3. `20261128000300_growth_review`: administrator decisions, telemetry, metrics, privilege restrictions.
-4. `20261128000400_growth_configuration_guard`: normalized configuration and strict string validation on writes.
+`TryoutRegistrationVerification.contactDetails` stores normalized WhatsApp, contact email and school for each submission. WhatsApp/school also update the existing user profile atomically on successful submission. Contact email never rewrites the login email. Submission/resubmission snapshots remain in `TryoutVerificationHistory`; retries cannot overwrite submitted personal data. Own status is private, and administrators see registration contact details for manual review.
 
-These four migrations were applied to the configured Main Supabase database on 28 November 2026. Before/after counts remained 27 tryouts, 143 attempts and 21 payments; zero existing tryouts had growth enabled. The database has no existing public Prisma migration baseline. Do not run a blind reset/deploy or invent a baseline; reconcile migration history separately before adopting Prisma deployment automation. Applied SQL must remain immutable.
+Manual submissions remain PENDING_VERIFICATION with no attempt. Owner/Admin checks are independent from participant claims. Partial progress never grants access, rejection requires reasons, resubmission retains history, and approval creates one NOT_STARTED attempt. Existing schedule/question-release checks still apply. Checklist-only and real paid access never claim verified Instagram engagement.
 
-All three new tables use RLS and revoke public/anonymous/authenticated access. Functions are server-only operations with public/anonymous/authenticated execution revoked. Application server database roles must be permitted to execute them and access their tables; browser Supabase keys must never receive these privileges.
+## Global community destination
 
-## API and invariants
+`TryoutGrowthSettings` is a singleton Main DB setting: communityUrl, revision, updatedBy and updatedAt. Initial URL is the WhatsApp invitation supplied by the owner on 28 November 2026. Owner/Admin can change it in Team ? Control Center ? Edit/Create Tryout ? Registration & Growth ? **Link Komunitas JITU (global)** ? **Simpan link global**.
 
-- Authenticated `POST /tryout/:id/register` accepts existing mode/expected price plus optional `growth`: normalized Instagram username, checklist, UUID requestKey/sessionId, configVersion and resubmission version.
-- `GET /tryout/:id/growth` returns only the session user's submission and participant-safe history. `POST /tryout/:id/growth/events` accepts only client event types.
-- Both Core Nest and student Next registration use the same PostgreSQL functions. User-row locking, uniqueness and compare-and-swap revisions serialize retries, concurrent admin decisions, and free/paid registration.
-- Admin identity comes from fresh Team Owner/Admin membership. Participant and admin checklists remain separate; required admin checks must be confirmed. Rejection requires reasons. Partial progress and every resubmission/decision are audited.
-- Pending requirements retain a configuration snapshot. Later edits apply to new submissions/resubmissions, preserving what an existing pending participant agreed to.
-- Real paid entitlement can resolve an existing pending submission, with method `PAID`; it never claims verified Instagram activity. A zero-price request named `PREMIUM` cannot bypass verification.
-- `assertGrowthAccess` blocks Core exam start/question delivery. Sandbox and existing QC governance remain intact. Prisma 7 adapter errors are mapped to safe 400/403/404/409 responses.
+There are no per-tryout URL overrides or environment-variable defaults. Every tryout resolves the current global destination dynamically, including pending outcomes. Required checklists retain their submission snapshot, while their community destination remains current. Stale community forms are rejected by the global revision check and must reload; browser drafts clear the old community declaration when the destination changes. Global edits use optimistic concurrency and fresh administrator authorization.
 
-## Configuration
+## Migrations and deployment
 
-Use Team Control Center → create/edit tryout → **Registration & Growth**. Configure Social Engagement, manual review, profile/campaign URLs, each enabled/required checklist item and mention requirement. URLs must be valid HTTPS Instagram profile/post URLs. Prize announcement and community invitation are independent toggles; both default off. Winner count defaults to 5 and prize type to Saldo E-Wallet. Community URLs must use HTTPS. Saving validates the complete configuration and its revision atomically with the tryout edit. Participants fetch current settings when opening registration; no redeployment is needed.
+The original four `20261128000100`?`20261128000400` migrations introduced verification/history/events and privileged shared registration/review functions. They are immutable and were already applied.
 
-The Team API optionally accepts server-only `JITU_COMMUNITY_URL` as the initial community URL for new configurations. It does not enable the invitation automatically. All persisted tryout overrides remain authoritative.
+The revised flow adds three migrations, applied in order in one transaction:
 
-## Analytics and limits
+1. `20261128000500_free_registration_configuration`: private global settings, current URL resolution, contactDetails column and automatic configuration rules.
+2. `20261128000600_free_registration_details`: personal-data validation/persistence, mandatory Instagram, community assertions and stale-link protection.
+3. `20261128000700_community_registration_review`: independent community review, community telemetry link type, existing tryout normalization and server-only privileges.
 
-Server events: `registration_submitted`, `registration_approved`, `registration_rejected`, `registration_resubmitted`. Client events: `registration_button_clicked`, `social_engagement_modal_viewed`, `social_engagement_link_clicked`, `social_engagement_modal_abandoned`, `community_invitation_clicked`, plus `community_invitation_viewed` for the CTR denominator. Client events are bounded and deduplicated; clients cannot submit canonical decision events.
+These three migrations were applied to the configured Main database on 28 November 2026, preserving 27 tryouts, 155 attempts and 21 payments.
 
-Conversion/abandonment use registration sessions, approval/rejection use current decided submissions, turnaround uses decision timestamps, and community CTR uses invitation-view sessions. These are measurements of application behavior. Participant declarations are not independently verified engagement; community clicks are not confirmed membership.
+The third migration enables the new requirements on existing tryouts and increments their configuration revisions; existing attempts/payments and pending snapshots remain intact. Deploy the database functions before enabling the updated applications. The configured database has no public Prisma migration baseline: do not run reset/blind deploy or invent baseline records. Use reviewed additive SQL and reconcile migration history separately.
 
-Instagram review is manual. Private accounts and unavailable Stories need administrator judgment; elapsed Story time never automatically rejects a registration. No Instagram credentials, screenshot uploads, scraping, or Instagram API automation are introduced. No existing outbound registration notification service was available; student status polling and in-app notifications are used while relevant UI is open.
+All four feature tables use RLS and revoke PUBLIC/anon/authenticated privileges. All growth_* functions revoke browser/public execution. Only authenticated application servers with appropriate database permissions call them. Do not grant privileged functions to browser Supabase roles.
 
-## Verification
+Core `POST /tryout/:id/register`, own GET `/growth`, client POST `/growth/events` and student Next equivalents share the same database rules. Transactions, unique user/tryout records, request IDs and revision checks protect concurrent submit/review/payment operations. Core exam start and question delivery enforce approval and map real Prisma 7 driver errors to safe HTTP responses.
 
-`npm run test:growth` builds production code and runs 20 localhost PostgreSQL/Prisma tests covering lifecycle, snapshots, concurrency, access, roles at the database boundary, invalid configuration, analytics and real Prisma 7 error mapping. `GROWTH_TEST_DATABASE_URL` defaults to localhost PostgreSQL and is explicitly forbidden from pointing to a remote host. Tests create and drop isolated databases; they never create accounts in shared Supabase.
+## Analytics and verification
 
-The existing Tryout/Exam Jest suites pass 32 cases. Main FE adds 13 API/render tests; Team BE adds 7 authenticated-administrator service tests; Team FE adds 4 configuration-derived UI tests. A separate isolated Chromium harness exercised actual student components/Next handlers, Team components/admin services and PostgreSQL through submission → rejection → correction → resubmission → approval, Save & Next, external-tab preservation, optional flags, mobile/dark mode and keyboard interaction. Only session identity was substituted in that local harness; live Supabase login and Instagram checks were not automated.
+Server decisions/submissions and bounded, deduplicated client events provide conversion, abandonment, decision rates, review turnaround and community CTR. Declarations/clicks do not prove Instagram engagement or community membership. Instagram/community review is manual; private accounts and expired Stories require judgment and never trigger automatic rejection. Participant notifications use visible-page polling and in-app messages; no outbound notification integration was available.
 
-See `registration-growth-files.md` for the implementation inventory and the corresponding documentation in the other three repositories.
+`npm run test:growth` builds and tests isolated localhost PostgreSQL with real Prisma 7: lifecycle/concurrency, profile validation, contact snapshots, automatic modes, mandatory follow/username, global URL propagation/revisions, authorization boundaries, private tables/functions, analytics and exam gates. Tests reject remote database URLs, create/drop temporary databases, and never create shared Supabase users. The Core Tryout/Exam Jest suites additionally cover existing registration and scheduling behavior. Frontend/admin suites and an isolated Chromium harness cover actual components, Next handlers and Team services through profile ? requirements ? pending ? reject/resubmit ? approve, global link editing, Save & Next, external tabs, mobile/dark mode and keyboard/Escape. Real Firebase/Supabase identity was substituted only in the local browser harness; external engagement is manual.
+
+See `registration-growth-files.md` for implementation files.

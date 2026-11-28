@@ -131,7 +131,7 @@ model Verification {
 }
 
 model TryOut {
-  growthConfig      Json @default("{\"enabled\":false}")
+  growthConfig      Json @default("{\"enabled\":true}")
   growthVersion     Int @default(0)
   growthUpdatedBy   String?
   growthRegistrations TryoutRegistrationVerification[]

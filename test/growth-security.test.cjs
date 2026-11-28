@@ -32,8 +32,8 @@ test('banned users cannot submit and one participant cannot read another partici
 });
 test('new tables use RLS and server functions have no PUBLIC execute privilege',async()=>{
  const tables=(await pool.query(`SELECT relname,relrowsecurity FROM pg_class WHERE relname IN
-  ('TryoutRegistrationVerification','TryoutVerificationHistory','TryoutGrowthEvent')`)).rows;
- assert.equal(tables.length,3);assert.ok(tables.every(x=>x.relrowsecurity));
+  ('TryoutRegistrationVerification','TryoutVerificationHistory','TryoutGrowthEvent','TryoutGrowthSettings')`)).rows;
+ assert.equal(tables.length,4);assert.ok(tables.every(x=>x.relrowsecurity));
  const grants=(await pool.query(`SELECT p.proname FROM pg_proc p CROSS JOIN LATERAL aclexplode(p.proacl) a
   WHERE p.proname LIKE 'growth_%' AND a.grantee=0 AND a.privilege_type='EXECUTE'`)).rows;
  assert.deepEqual(grants,[]);

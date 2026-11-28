@@ -11,6 +11,9 @@ See `registration-growth.md` for behavior, configuration, migrations, tests and 
 - `prisma/migrations/20261128000200_growth_registration/migration.sql`
 - `prisma/migrations/20261128000300_growth_review/migration.sql`
 - `prisma/migrations/20261128000400_growth_configuration_guard/migration.sql`
+- `prisma/migrations/20261128000500_free_registration_configuration/migration.sql`
+- `prisma/migrations/20261128000600_free_registration_details/migration.sql`
+- `prisma/migrations/20261128000700_community_registration_review/migration.sql`
 - `prisma/schema.prisma`
 - `src/modules/exam/exam.service.ts`
 - `src/modules/tryout/dto/growth-registration.dto.ts`
@@ -20,6 +23,7 @@ See `registration-growth.md` for behavior, configuration, migrations, tests and 
 - `src/modules/tryout/tryout.module.ts`
 - `src/modules/tryout/tryout.service.spec.ts`
 - `src/modules/tryout/tryout.service.ts`
+- `test/free-registration-requirements.test.cjs`
 - `test/growth-core-access.test.cjs`
 - `test/growth-fixture.cjs`
 - `test/growth-registration.test.cjs`

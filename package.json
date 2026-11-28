@@ -7,7 +7,7 @@
   "license": "UNLICENSED",
   "packageManager": "pnpm@10.28.0",
   "scripts": {
-    "test:growth": "npm run build && node --test test/growth-registration.test.cjs test/growth-security.test.cjs test/growth-core-access.test.cjs",
+    "test:growth": "npm run build && node --test test/growth-registration.test.cjs test/growth-security.test.cjs test/growth-core-access.test.cjs test/free-registration-requirements.test.cjs",
     "test:affiliate": "node --test test/affiliate-database.test.cjs test/affiliate-concurrency.test.cjs",
     "build": "prisma generate && nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",

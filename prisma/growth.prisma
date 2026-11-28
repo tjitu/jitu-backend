@@ -5,6 +5,7 @@ model TryoutRegistrationVerification {
   status               String
   instagramUsername    String?
   submittedChecklist   Json     @default("{}")
+  contactDetails       Json     @default("{}")
   adminChecklist       Json     @default("{}")
   configSnapshot       Json
   configVersion        Int
@@ -52,4 +53,12 @@ model TryoutGrowthEvent {
   tryout    TryOut   @relation(fields: [tryoutId], references: [id], onDelete: Cascade)
   user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   @@index([tryoutId, createdAt, event], map: "growth_event_tryout_idx")
+}
+
+model TryoutGrowthSettings {
+  id           String   @id @default("global")
+  communityUrl String
+  version      Int      @default(1)
+  updatedBy    String?
+  updatedAt    DateTime @default(now()) @db.Timestamptz(3)
 }

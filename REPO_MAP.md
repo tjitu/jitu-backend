@@ -50,3 +50,5 @@ jitu-backend/
 * **Payment Webhooks**: Midtrans notifications handled inside `shop/` with signature validation.
 
 * **Registration growth**: `prisma/growth.prisma` and four `20261128*` migrations own private verification/history/events and shared atomic PostgreSQL rules. `src/modules/tryout/tryout-growth.controller.ts`, `growth-registration.ts` and DTOs serve authenticated registration/state/telemetry; exam start/questions enforce approval. See `docs/registration-growth.md` and `npm run test:growth`.
+
+* Free registration now collects WhatsApp/contact email/school first; blank campaign requires follow + community, campaign mode retains follow + campaign tasks. One mutable Main DB `TryoutGrowthSettings` destination is edited through Team `tryout-growth/settings`; contact snapshots and independent community review preserve privacy/audit. See `docs/registration-growth.md`.

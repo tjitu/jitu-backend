@@ -5,10 +5,13 @@ const {createGrowthDatabase,fixture,submit,review,confirmed}=require('./growth-f
 let db,pool;
 before(async()=>{db=await createGrowthDatabase();pool=db.pool;});
 after(async()=>{await db?.cleanup();});
-test('existing tryouts have growth disabled and retain the legacy registration path',async()=>{
- const f=await fixture(pool,{enabled:false});assert.equal(await submit(pool,f),null);
+test('free registration requirements apply by default while existing attempts are grandfathered',async()=>{
+ const f=await fixture(pool,{enabled:false});assert.equal((await submit(pool,f)).verification.status,'PENDING_VERIFICATION');
  const legacy=(await pool.query('SELECT "growthConfig","growthVersion" FROM "TryOut" WHERE id=$1',['legacy'])).rows[0];
- assert.deepEqual(legacy.growthConfig,{enabled:false});assert.equal(legacy.growthVersion,0);
+ assert.equal(legacy.growthConfig.enabled,true);assert.equal(legacy.growthVersion,1);
+ const registered=await fixture(pool);
+ await pool.query('INSERT INTO "TryOutAttempt" (id,"userId",try_out_id,status) VALUES ($1,$2,$3,$4)',[randomUUID(),registered.user,registered.tryout,'NOT_STARTED']);
+ assert.equal(await submit(pool,registered),null);
 });
 test('manual submission requires a valid normalized Instagram username and required checklist',async()=>{
  const f=await fixture(pool);
@@ -77,7 +80,7 @@ test('resubmission after registration closes is rejected',async()=>{
  await assert.rejects(submit(pool,f,{...f.input,version:rejected.version,requestKey:randomUUID()}),/GROWTH_CLOSED/);
 });
 test('checklist-only registration admits users without claiming manual Instagram verification',async()=>{
- const f=await fixture(pool,{manualVerification:false});const state=await submit(pool,f,{...f.input,instagramUsername:''});
+ const f=await fixture(pool,{manualVerification:false});const state=await submit(pool,f);
  assert.equal(state.isRegistered,true);assert.equal(state.verification.status,'APPROVED');assert.equal(state.verification.verifiedAt,null);
  const metadata=(await pool.query('SELECT metadata FROM "TryoutGrowthEvent" WHERE "tryoutId"=$1 AND event=$2',[f.tryout,'registration_approved'])).rows[0].metadata;
  assert.equal(metadata.engagementVerified,false);assert.equal(metadata.method,'CHECKLIST');
