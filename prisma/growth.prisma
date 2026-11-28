@@ -1,0 +1,55 @@
+model TryoutRegistrationVerification {
+  id                   String   @id @default(uuid())
+  tryoutId             String
+  userId               String
+  status               String
+  instagramUsername    String?
+  submittedChecklist   Json     @default("{}")
+  adminChecklist       Json     @default("{}")
+  configSnapshot       Json
+  configVersion        Int
+  version              Int      @default(1)
+  submissionNumber     Int      @default(1)
+  requestKey           String
+  submittedAt          DateTime @default(now()) @db.Timestamptz(3)
+  verifiedAt           DateTime? @db.Timestamptz(3)
+  verifiedBy           String?
+  approvalMethod       String?
+  rejectionReasons     String[] @default([])
+  createdAt            DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime @default(now()) @db.Timestamptz(3)
+  tryout               TryOut   @relation(fields: [tryoutId], references: [id], onDelete: Cascade)
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  history              TryoutVerificationHistory[]
+  @@unique([tryoutId, userId])
+  @@index([tryoutId, status, submittedAt, id], map: "growth_verification_queue_idx")
+  @@index([userId], map: "growth_verification_user_idx")
+}
+
+model TryoutVerificationHistory {
+  id             String   @id @default(uuid())
+  tryoutId       String
+  verificationId String?
+  action         String
+  actorId        String
+  before         Json?
+  after          Json
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  tryout         TryOut   @relation(fields: [tryoutId], references: [id], onDelete: Cascade)
+  verification   TryoutRegistrationVerification? @relation(fields: [verificationId], references: [id], onDelete: Cascade)
+  @@index([verificationId, createdAt, id], map: "growth_history_verification_idx")
+}
+
+model TryoutGrowthEvent {
+  id        String   @id
+  tryoutId  String
+  userId    String?
+  event     String
+  source    String
+  sessionId String?
+  metadata  Json     @default("{}")
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  tryout    TryOut   @relation(fields: [tryoutId], references: [id], onDelete: Cascade)
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  @@index([tryoutId, createdAt, event], map: "growth_event_tryout_idx")
+}

@@ -48,6 +48,8 @@ enum PaymentStatus {
 }
 
 model User {
+  growthRegistrations TryoutRegistrationVerification[]
+  growthEvents TryoutGrowthEvent[]
   id                String             @id
   name              String
   email             String
@@ -129,6 +131,12 @@ model Verification {
 }
 
 model TryOut {
+  growthConfig      Json @default("{\"enabled\":false}")
+  growthVersion     Int @default(0)
+  growthUpdatedBy   String?
+  growthRegistrations TryoutRegistrationVerification[]
+  growthHistory    TryoutVerificationHistory[]
+  growthEvents     TryoutGrowthEvent[]
   id            String       @id @default(cuid())
   title         String
   description   String?      @db.Text

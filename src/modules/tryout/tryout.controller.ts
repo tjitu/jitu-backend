@@ -6,7 +6,6 @@ import {
   Query,
   UseGuards,
   Post,
-  Body,
 } from '@nestjs/common';
 import { TryoutService } from './tryout.service';
 import {
@@ -87,21 +86,4 @@ export class TryoutController {
     return this.tryoutService.unlockSolution(session.user.id, id);
   }
 
-  @Post(':id/register')
-  @UseGuards(AuthGuard)
-  async registerTryout(
-    @Param('id') id: string,
-    @Session() session: UserSession,
-    @Body() body?: { mode?: 'FREE' | 'PREMIUM'; expectedSolutionPrice?: number },
-    @Query('sandboxToken') sandboxTokenQuery?: string,
-    @Headers('x-sandbox-token') sandboxTokenHeader?: string,
-  ) {
-    return this.tryoutService.registerTryout(
-      session.user.id,
-      id,
-      sandboxTokenQuery || sandboxTokenHeader,
-      body?.mode ?? 'FREE',
-      body?.expectedSolutionPrice,
-    );
-  }
 }

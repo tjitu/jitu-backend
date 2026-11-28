@@ -48,3 +48,5 @@ jitu-backend/
 * **ORM**: Prisma 7 with custom output path at `generated/prisma`. Use `PrismaService` injection.
 * **Database**: PostgreSQL hosted on Supabase (`DATABASE_URL` pooler).
 * **Payment Webhooks**: Midtrans notifications handled inside `shop/` with signature validation.
+
+* **Registration growth**: `prisma/growth.prisma` and four `20261128*` migrations own private verification/history/events and shared atomic PostgreSQL rules. `src/modules/tryout/tryout-growth.controller.ts`, `growth-registration.ts` and DTOs serve authenticated registration/state/telemetry; exam start/questions enforce approval. See `docs/registration-growth.md` and `npm run test:growth`.

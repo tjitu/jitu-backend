@@ -1,4 +1,6 @@
 import { loadReviewSolutions } from './review-solutions';
+import { assertGrowthAccess, growthQuery, submitGrowthRegistration, type TryoutRegistrationResult } from './growth-registration';
+import { Prisma } from '../../../generated/prisma/client';
 import { areTryoutResultsAvailable } from '../../common/utils/tryout-results.util';
 import {
   Injectable,
@@ -123,7 +125,8 @@ export class TryoutService {
     sandboxToken?: string,
     mode: 'FREE' | 'PREMIUM' = 'FREE',
     expectedSolutionPrice?: number,
-  ) {
+    growth?: unknown,
+  ): Promise<TryoutRegistrationResult> {
     // 1. Cek Tryout
     const tryout = await this.prisma.tryOut.findUnique({
       where: { id: tryoutId },
@@ -166,6 +169,10 @@ export class TryoutService {
         throw new BadRequestException(
           `Biaya pembahasan berubah menjadi ${price} coin. Muat ulang halaman lalu daftar kembali.`,
         );
+      }
+      if (curationStatus === 'PUBLISHED' && (mode !== 'PREMIUM' || price <= 0)) {
+        const registration = await submitGrowthRegistration(tx, tryoutId, userId, growth);
+        if (registration) return registration;
       }
       let attempt = await tx.tryOutAttempt.findFirst({
         where: { userId, tryOutId: tryoutId },
@@ -210,6 +217,9 @@ export class TryoutService {
         }
       }
 
+      if (mode === 'PREMIUM' && price > 0) {
+        await growthQuery(tx, Prisma.sql`SELECT growth_finalize_paid(${tryoutId},${userId})`);
+      }
       return {
         message: mode === 'PREMIUM' && price > 0
           ? 'Berhasil daftar dengan pembahasan.'
@@ -721,6 +731,7 @@ export class TryoutService {
         sandboxToken,
       );
 
+    if (!canSandbox) await assertGrowthAccess(this.prisma, tryOutId, userId);
     if (!canSandbox && !questionsReleased) {
       const schedule = await this.prisma.tryOut.findUnique({ where: { id: tryOutId }, select: { scheduledStart: true } });
       if (schedule?.scheduledStart && new Date() < new Date(schedule.scheduledStart)) {

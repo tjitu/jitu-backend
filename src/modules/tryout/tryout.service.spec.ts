@@ -160,6 +160,7 @@ describe('TryoutService', () => {
       }]);
       const tx = {
         $queryRaw: jest.fn()
+          .mockResolvedValue([{ state: null }])
           .mockResolvedValueOnce([{ id: 'user-1' }])
           .mockResolvedValueOnce([{ solutionPrice: price }]),
         tryOutAttempt: {

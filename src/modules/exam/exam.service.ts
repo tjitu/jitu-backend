@@ -19,6 +19,7 @@ import {
   resolveTryoutAccess,
 } from '../tryout/tryout-curation.helper';
 import { IrtService } from '../irt/irt.service';
+import { assertGrowthAccess } from '../tryout/growth-registration';
 
 @Injectable()
 export class ExamService implements OnModuleInit, OnModuleDestroy {
@@ -103,6 +104,7 @@ export class ExamService implements OnModuleInit, OnModuleDestroy {
         sandboxToken,
       );
 
+    if (!canSandbox) await assertGrowthAccess(this.prisma, tryOutId, userId);
     if (curationStatus === 'PUBLISHED' && !canSandbox) {
       const tryout = await this.prisma.tryOut.findUnique({
         where: { id: tryOutId },
